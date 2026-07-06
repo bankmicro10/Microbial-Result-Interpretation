@@ -3,6 +3,10 @@
 {% with step = 1 %}{% include "_stepper.html" %}{% endwith %}
 <div class="card">
   <h2 style="margin-top:0">1 · Upload raw data</h2>
+  <div style="background:var(--brand-light);border-radius:8px;padding:12px 14px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+    <span class="muted" style="color:var(--brand-dark)">ยังไม่มีฟอร์ม? โหลดฟอร์มมาตรฐาน <b>LF07-05-22</b> ไปกรอกผลนับ แล้วอัปกลับมาแปลผล</span>
+    <a class="btn ghost" href="{{ url_for('form_template') }}">⬇ ดาวน์โหลดฟอร์มมาตรฐาน</a>
+  </div>
   <form action="{{ url_for('upload') }}" method="post" enctype="multipart/form-data">
     <label>ไฟล์ raw data (CSV / XLSX) — คอลัมน์: lab_code, analyte, dilution, count</label>
     <input type="file" name="file" accept=".csv,.xlsx" required>

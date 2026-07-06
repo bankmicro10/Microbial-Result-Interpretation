@@ -27,6 +27,10 @@ app.secret_key = "prototype-microbial"
 UPLOAD_DIR = os.path.join(_HERE, "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+# ฟอร์มมาตรฐานให้ผู้ใช้โหลดไปกรอก แล้วอัปกลับ (write-back คง checkbox/เลย์เอาต์)
+TEMPLATE_FORM = os.path.join(_HERE, "static", "LF07-05-22_template.xlsx")
+TEMPLATE_FORM_NAME = "LF07-05-22 Plate count template.xlsx"
+
 # in-memory batch store (prototype) — full build ใช้ DB
 BATCHES: dict[str, dict] = {}
 CURRENT_USER = "lab.staff"          # prototype: จำลอง login
@@ -45,6 +49,14 @@ def index():
     return render_template("upload.html", standards=STANDARDS,
                            batches=sorted(BATCHES.values(),
                                           key=lambda b: b["created"], reverse=True))
+
+
+@app.route("/form/template")
+def form_template():
+    """ดาวน์โหลดฟอร์มมาตรฐาน LF07-05-22 (เปล่า) ไปกรอก"""
+    return send_file(TEMPLATE_FORM, as_attachment=True,
+                     download_name=TEMPLATE_FORM_NAME,
+                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 
 @app.route("/upload", methods=["POST"])
