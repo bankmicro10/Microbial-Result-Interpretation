@@ -159,6 +159,7 @@ def process(df: pd.DataFrame, standard: str, V=1.0, n_per=1, range_override=None
     lo, hi = std["countable_range"]
     df = df.copy()
     df["_base"], df["_rep"] = zip(*df["lab_code"].map(_base_lab))
+    df["_hasrep"] = df["lab_code"].map(lambda s: bool(_REP_RE.search(str(s))))   # มี suffix No.X จริงไหม
     df["_d"] = df["dilution"].map(parse_dilution)
     df["_c"] = df["count"].map(parse_count)
 
@@ -207,7 +208,14 @@ def process(df: pd.DataFrame, standard: str, V=1.0, n_per=1, range_override=None
         if res.remark:
             df.at[first, "remark"] = res.remark
 
-    result = df.drop(columns=["_base", "_rep", "_d", "_c"])
+        # safeguard: มี suffix No.X แต่ base นี้มี rep เดียว → ไม่พบคู่ duplicate (มักเกิดจาก base พิมพ์ผิด)
+        marker_reps = sorted({rp for rp, has in zip(grp["_rep"], grp["_hasrep"]) if has})
+        if len(marker_reps) == 1:
+            warn = f"⚠ duplicate No.{marker_reps[0]} ไม่พบคู่ base เดียวกัน"
+            cur = df.at[first, "remark"]
+            df.at[first, "remark"] = f"{cur} | {warn}" if (pd.notna(cur) and str(cur).strip()) else warn
+
+    result = df.drop(columns=["_base", "_rep", "_hasrep", "_d", "_c"])
     result.attrs = dict(df.attrs)                 # คง metadata (template) ผ่าน process
     return result
 
