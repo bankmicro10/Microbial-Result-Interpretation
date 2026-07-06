@@ -252,17 +252,6 @@ def _col_num(ref: str) -> int:
     return n
 
 
-def _register_ns_from(xml: bytes):
-    """register prefix→uri จาก root element เดิม เพื่อคง prefix ตอน serialize (กันไฟล์เพี้ยน)"""
-    from xml.etree import ElementTree as ET
-    head = xml[:2048].decode("utf-8", "ignore")
-    for m in re.finditer(r'xmlns:([A-Za-z0-9]+)="([^"]+)"', head):
-        ET.register_namespace(m.group(1), m.group(2))
-    m = re.search(r'xmlns="([^"]+)"', head)
-    if m:
-        ET.register_namespace("", m.group(1))
-
-
 def _first_sheet_part(zf) -> str:
     """หา path ของ worksheet แรก (active) ผ่าน workbook rels — fallback = worksheet แรกใน zip"""
     from xml.etree import ElementTree as ET
@@ -287,55 +276,59 @@ def _first_sheet_part(zf) -> str:
     return "xl/worksheets/sheet1.xml"
 
 
-def _inject_cells_inline(sheet_xml: bytes, cells: dict) -> bytes:
-    """เขียนค่า inline string ลง sheet xml โดยไม่แตะ part อื่น (คง form control/drawing).
-    cells: {(row_1based, col_1based): value_str}. ค่าเป็น string → Excel ไม่แปลง 1.4E+03 เป็นเลข"""
-    from xml.etree import ElementTree as ET
-    _register_ns_from(sheet_xml)
-    q = lambda t: f"{{{_SS_NS}}}{t}"                                       # noqa: E731
-    root = ET.fromstring(sheet_xml)
-    sheet_data = root.find(q("sheetData"))
-    if sheet_data is None:
-        return sheet_xml
+def _esc(v: str) -> str:
+    """escape สำหรับ XML text (inline string) — จัด & ก่อนเสมอ"""
+    return v.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
-    rows = {int(r.get("r")): r for r in sheet_data.findall(q("row")) if r.get("r")}
+
+def _inline_cell(ref: str, val: str, s_attr: str = "") -> str:
+    """สร้าง <c> inline string 1 เซลล์ (ค่าเป็น text → Excel ไม่แปลง 1.4E+03 เป็นเลข)"""
+    sp = ' xml:space="preserve"' if val != val.strip() else ""
+    return f'<c r="{ref}"{s_attr} t="inlineStr"><is><t{sp}>{_esc(val)}</t></is></c>'
+
+
+def _inject_cells_inline(sheet_xml: bytes, cells: dict) -> bytes:
+    """เขียนค่า inline string ลง sheet xml แบบแก้ raw XML เฉพาะเซลล์เป้าหมาย —
+    ส่วนที่เหลือ (root xmlns, controls, mc:AlternateContent, drawing) คง byte เดิมเป๊ะ
+    กัน ElementTree ดรอป namespace (x14/xr) แล้ว Excel ฟ้องไฟล์เสีย.
+    cells: {(row_1based, col_1based): value_str}"""
+    text = sheet_xml.decode("utf-8")
     by_row: dict[int, dict[int, str]] = {}
     for (rnum, cnum), val in cells.items():
         by_row.setdefault(rnum, {})[cnum] = val
 
     for rnum in sorted(by_row):
-        row_el = rows.get(rnum)
-        if row_el is None:                                                # แถวไม่มี → สร้าง + แทรกตามลำดับ r
-            row_el = ET.Element(q("row")); row_el.set("r", str(rnum))
-            kids = list(sheet_data)
-            idx = sum(1 for k in kids if int(k.get("r", "0")) < rnum)
-            sheet_data.insert(idx, row_el)
-            rows[rnum] = row_el
+        m = re.search(rf'<row r="{rnum}"([^>]*?)(?:/>|>(.*?)</row>)', text, re.S)
+        if m is None:                                                     # แถวไม่มี → สร้างใหม่ แทรกตามลำดับ r
+            inner = "".join(_inline_cell(f"{_col_letter(c)}{rnum}", by_row[rnum][c])
+                            for c in sorted(by_row[rnum]))
+            row_el = f'<row r="{rnum}">{inner}</row>'
+            nxt = None
+            for rm in re.finditer(r'<row r="(\d+)"', text):
+                if int(rm.group(1)) > rnum:
+                    nxt = rm.start(); break
+            pos = nxt if nxt is not None else text.index("</sheetData>")
+            text = text[:pos] + row_el + text[pos:]
+            continue
 
-        existing = {c.get("r"): c for c in row_el.findall(q("c"))}
+        attrs, body = m.group(1), (m.group(2) or "")                      # self-close → body ""
+        open_tag = f'<row r="{rnum}"{attrs}>'
         for cnum in sorted(by_row[rnum]):
             ref, val = f"{_col_letter(cnum)}{rnum}", by_row[rnum][cnum]
-            cell = existing.get(ref)
-            if cell is None:                                              # เซลล์ไม่มี → สร้าง + สืบทอด style เพื่อนซ้าย (คงเส้นตาราง)
-                cell = ET.Element(q("c")); cell.set("r", ref)
-                left = [k for k in row_el if 0 < _col_num(k.get("r", "")) < cnum]
-                if left and left[-1].get("s"):
-                    cell.set("s", left[-1].get("s"))
-                idx = sum(1 for k in row_el if 0 < _col_num(k.get("r", "")) < cnum)
-                row_el.insert(idx, cell)
-            else:                                                         # เซลล์มี → ล้างค่าเดิม คง attribute/style
-                for ch in list(cell):
-                    cell.remove(ch)
-                cell.attrib.pop("t", None)
-            cell.set("t", "inlineStr")
-            is_el = ET.SubElement(cell, q("is"))
-            t_el = ET.SubElement(is_el, q("t"))
-            t_el.text = val
-            if val != val.strip():
-                t_el.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+            cm = re.search(rf'<c r="{ref}"([^>]*?)(?:/>|>.*?</c>)', body, re.S)
+            if cm:                                                        # เซลล์มี → แทนที่ คง style (s)
+                sm = re.search(r'\ss="\d+"', cm.group(1))
+                body = body[:cm.start()] + _inline_cell(ref, val, sm.group(0) if sm else "") + body[cm.end():]
+            else:                                                         # ไม่มี → แทรกตามลำดับคอลัมน์
+                nxt = None
+                for xm in re.finditer(r'<c r="([A-Z]+)\d+"', body):
+                    if _col_num(xm.group(1)) > cnum:
+                        nxt = xm.start(); break
+                cell = _inline_cell(ref, val)
+                body = (body + cell) if nxt is None else (body[:nxt] + cell + body[nxt:])
+        text = text[:m.start()] + open_tag + body + "</row>" + text[m.end():]
 
-    body = ET.tostring(root, encoding="unicode").encode("utf-8")
-    return b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n' + body
+    return text.encode("utf-8")
 
 
 def write_back_template(out_df: pd.DataFrame, meta: dict, dest):
