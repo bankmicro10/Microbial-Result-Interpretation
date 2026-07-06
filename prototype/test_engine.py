@@ -65,8 +65,34 @@ def test_general_tntc_then_out_of_range_est():
 
 
 def test_general_all_literal_tntc():
+    # ทุก dilution TNTC → > (hi ÷ dilution ที่ dilute สุด) est. : 150/0.01 = 1.5E+04
     r = interpret_general([[Reading(0.1, TNTC), Reading(0.01, TNTC)]], GEN)
-    assert r.result == "TNTC"
+    assert r.result == ">1.5E+04 est."
+
+
+def test_general_all_tntc_uses_most_dilute():
+    # dilute สุด = 1e-05 → 150/1e-05 = 1.5E+07
+    r = interpret_general([[Reading(0.001, TNTC), Reading(0.0001, TNTC), Reading(1e-05, TNTC)]], GEN)
+    assert r.result == ">1.5E+07 est."
+
+
+def test_general_all_tntc_range_300():
+    # ขอบบน 300, dilute สุด 0.01 → 300/0.01 = 3.0E+04 (ตัวอย่างจาก requirement)
+    std = dict(GEN); std["countable_range"] = [15, 300]
+    r = interpret_general([[Reading(0.1, TNTC), Reading(0.01, TNTC)]], std)
+    assert r.result == ">3.0E+04 est."
+
+
+def test_general_not_found_ge100_scientific():
+    # ไม่พบ, dilute สุดที่ทำ 0.01 → detection limit 1/0.01 = 100 ≥100 → scientific
+    r = interpret_general([[Reading(0.01, 0), Reading(0.001, 0)]], GEN)
+    assert r.result == "<1.0E+02 est."
+
+
+def test_general_not_found_lt100_plain():
+    # ไม่พบ, dilute สุด 0.1 → 1/0.1 = 10 (<100) → คงจำนวนเต็ม
+    r = interpret_general([[Reading(0.1, 0), Reading(0.01, 0)]], GEN)
+    assert r.result == "<10 est."
 
 
 def test_general_value_1_to_99_plain():

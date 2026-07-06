@@ -163,19 +163,21 @@ def _interpret_general_single(readings: list[Reading], std: dict) -> Result:
             return Result(format_report(val, std), calcs, f"Ratio = {ratio:.1f}")
         return Result(format_report(calc1, std), calcs, f"Ratio = {round(ratio)}")
 
-    # ไม่มีแถวในช่วง → est. / TNTC / not-detected
+    # ไม่มีแถวในช่วง → TNTC(over) / est.(นอกช่วง) / not-detected
     nums = [r for r in readings if isinstance(r.count, int)]
-    lowest_d = max(r.d for r in readings)
     # TNTC เฉพาะ token จริงเท่านั้น — เลขนับ >hi ถือเป็น "นอกช่วง" ไม่ใช่ TNTC
     if all(r.count == TNTC for r in readings):
-        return Result("TNTC", ["TNTC"])
+        # ทุก dilution เป็น TNTC → รายงาน > (ขอบบนช่วง ÷ dilution ที่ dilute สุดที่ทำ) est.
+        val = hi / min(r.d for r in readings)
+        return Result(">" + format_report(val, std) + " est.", ["TNTC"])
     non_zero = [r for r in nums if r.count > 0]            # int ทุกค่า (รวม >hi), ตัด TNTC/0 ออก
     if non_zero:                                           # นอกช่วงทุก dilution → est.
         r = max(non_zero, key=lambda x: x.count)
         val = r.count / r.d
         return Result(format_report(val, std) + " est.", [round(val)])
-    val = 1 / lowest_d                                     # ไม่พบตั้งแต่แรก
-    return Result("<" + str(int(val)) + " est.", ["<" + str(int(val))])
+    val = 1 / max(r.d for r in readings)                  # ไม่พบตั้งแต่แรก → detection limit
+    # ค่า ≥100 → scientific (ผ่าน format_report), 1–99 คงเป็นจำนวนเต็ม
+    return Result("<" + format_report(val, std) + " est.", ["<" + str(int(val))])
 
 
 def interpret_general(replicates: list[list[Reading]], std: dict) -> Result:
