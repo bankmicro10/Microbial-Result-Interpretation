@@ -1,0 +1,13 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "webapp",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "/Users/khunjookjig/.microbial-preview/webapp/app.py"
+      ],
+      "autoPort": true
+    }
+  ]
+}

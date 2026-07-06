@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(file *)",
+      "Bash(unzip -o -q \"มาตรฐานการคำนวณ.docx\" -d /private/tmp/claude-502/docx_extract)"
+    ]
+  }
+}

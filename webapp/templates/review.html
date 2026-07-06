@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block body %}
+{% with step = 3 if b.status == 'Approved' else 2 %}{% include "_stepper.html" %}{% endwith %}
+<p><a href="{{ url_for('index') }}">← กลับหน้า upload</a></p>
+
+<div class="card">
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+    <div>
+      <h2 style="margin:0 0 6px">{{ b.filename }}</h2>
+      <span class="muted">มาตรฐาน <b>{{ b.standard }}</b> · V={{ b.V }} · n={{ b.n_per }} · ช่วงนับ {{ b.range[0] }}–{{ b.range[1] }}</span>
+    </div>
+    <span class="pill {{ b.status }}">{{ b.status }}</span>
+  </div>
+</div>
+
+<div class="card" style="padding:0">
+  <table>
+    <thead><tr>{% for c in columns %}<th>{{ c }}</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for r in rows %}
+      {% set res = (r.result or '')|string %}
+      {% set flag = res and (res.endswith('est.') or 'TNTC' in res or res.startswith('<') or res.startswith('>')) %}
+      <tr class="{{ 'hl' if flag else '' }}">
+        {% for c in columns %}
+          <td class="{{ 'mono' if c in ['calculated','result'] else '' }}">{{ r[c] }}</td>
+        {% endfor %}
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="muted">แถวไฮไลต์ = special case (est. / TNTC / &lt; / &gt;) ควรตรวจก่อนอนุมัติ</p>
+
+<h2>Workflow อนุมัติ</h2>
+<div class="card">
+  {% if b.status in ['Submitted','Rejected'] %}
+  <form action="{{ url_for('decide', bid=b.id, action='approve') }}" method="post" style="display:inline">
+    <input type="hidden" name="note" value="reviewed">
+    <button class="btn ok" type="submit">อนุมัติ (Approve)</button>
+  </form>
+  <form action="{{ url_for('decide', bid=b.id, action='reject') }}" method="post" style="display:inline;margin-left:8px">
+    <input type="hidden" name="note" value="need re-check">
+    <button class="btn danger" type="submit">ปฏิเสธ (Reject)</button>
+  </form>
+  {% else %}
+  <p class="muted" style="margin:0 0 12px">ผลถูกอนุมัติแล้ว — ล็อกไม่ให้แก้</p>
+  {% endif %}
+  <a class="btn ghost" href="{{ url_for('download', bid=b.id) }}" style="margin-left:8px">ดาวน์โหลดไฟล์ผล</a>
+</div>
+
+<h2>Audit trail</h2>
+<div class="card">
+  <ul class="log">
+    {% for e in b.log %}
+      <li><span class="mono">{{ e.time }}</span> · <b>{{ e.action }}</b> · {{ e.actor }}{% if e.note %} · {{ e.note }}{% endif %}</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endblock %}

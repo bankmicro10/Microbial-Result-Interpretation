@@ -1,0 +1,9 @@
+{# stepper 1→2→3 — รับ step (1=upload, 2=review, 3=approved) #}
+<div class="stepper">
+  {% for i, name in [(1,'Upload'),(2,'Review'),(3,'Approve')] %}
+  <div class="step {{ 'done' if i < step else ('active' if i == step else '') }}">
+    <div class="dot">{{ '✓' if i < step else i }}</div>
+    <div class="lbl">{{ name }}</div>
+  </div>
+  {% endfor %}
+</div>

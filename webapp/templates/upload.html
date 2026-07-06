@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block body %}
+{% with step = 1 %}{% include "_stepper.html" %}{% endwith %}
+<div class="card">
+  <h2 style="margin-top:0">1 · Upload raw data</h2>
+  <form action="{{ url_for('upload') }}" method="post" enctype="multipart/form-data">
+    <label>ไฟล์ raw data (CSV / XLSX) — คอลัมน์: lab_code, analyte, dilution, count</label>
+    <input type="file" name="file" accept=".csv,.xlsx" required>
+
+    <div class="row">
+      <div>
+        <label>มาตรฐาน</label>
+        <select name="standard" id="standard" onchange="setRange()">
+          {% for key, s in standards.items() %}
+          <option value="{{ key }}" data-lo="{{ s.countable_range[0] }}" data-hi="{{ s.countable_range[1] }}">{{ s.label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div><label>V (ml)</label><input type="number" step="0.1" name="V" value="1"></div>
+      <div><label>plate ต่อ dilution (n)</label><input type="number" name="n_per" value="1"></div>
+      <div><label>ช่วงนับ ต่ำสุด</label><input type="number" name="range_lo" id="range_lo"></div>
+      <div><label>ช่วงนับ สูงสุด</label><input type="number" name="range_hi" id="range_hi"></div>
+    </div>
+    <div style="margin-top:16px"><button class="btn" type="submit">แปลผล</button></div>
+  </form>
+</div>
+
+{% if batches %}
+<h2>Batch ล่าสุด</h2>
+<div class="card" style="padding:0">
+  <table>
+    <thead><tr><th>ไฟล์</th><th>มาตรฐาน</th><th>สถานะ</th><th>เวลา</th><th></th></tr></thead>
+    <tbody>
+    {% for b in batches %}
+      <tr>
+        <td>{{ b.filename }}</td>
+        <td class="muted">{{ b.standard }}</td>
+        <td><span class="pill {{ b.status }}">{{ b.status }}</span></td>
+        <td class="muted">{{ b.created }}</td>
+        <td><a href="{{ url_for('review', bid=b.id) }}">เปิด →</a></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<script>
+function setRange(){
+  var o=document.getElementById('standard').selectedOptions[0];
+  document.getElementById('range_lo').value=o.dataset.lo;
+  document.getElementById('range_hi').value=o.dataset.hi;
+}
+setRange();
+</script>
+{% endblock %}

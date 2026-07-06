@@ -1,0 +1,36 @@
+# Mapping: method (ชนิดการทดสอบ) ↔ standard ↔ ช่วงนับ default ↔ หน่วย
+# ผู้ใช้เลือก standard + กรอก V, n1, n2 ตอน upload; ค่าตรงนี้เป็น default ที่แก้ได้
+# ช่วงนับ: [min, max] ; report_sig_figs: จำนวนเลขนัยสำคัญที่รายงาน
+
+standards:
+  ISO7218:
+    label: "ISO 7218:2024"
+    countable_range: [10, 150]
+    report_sig_figs: 2
+    rounding: half_up            # เลข 5 ปัดขึ้น
+    report_format: auto          # <100 = plain, else scientific X.YE+NN
+  FDA_BAM:
+    label: "FDA BAM Chapter 3 (2026)"
+    countable_range: [15, 300]
+    report_sig_figs: 2
+    rounding: bankers            # เลข 5 ดูหลักที่ 2 คู่/คี่
+    report_format: plain_grouped # 24,000
+    out_of_range_tag: "EAPC"
+  General:
+    label: "General (in-house / 3.General)"
+    countable_range: [15, 150]   # ตัวอย่าง E.coli Petrifilm
+    report_sig_figs: 2           # หมายเหตุ: เอกสารเรียก "1 ตำแหน่ง" = mantissa 1 ทศนิยม (ตามตัวอย่าง 1.4E+03)
+    rounding: bankers
+    report_format: scientific
+    ratio_threshold: 2.0
+    duplicate_rule: max          # เลือกค่ามากสุดจาก No.1/No.2
+
+# ตัวอย่าง mapping method → standard/หน่วย (ปรับตามฟอร์ม LF07-05-22 / LM 7.2-04)
+methods:
+  APC:            { standard: ISO7218, unit: "cfu/g" }
+  Coliforms:      { standard: General, unit: "cfu/g" }
+  E_coli:         { standard: General, unit: "cfu/g" }
+  E_coli_Petrifilm: { standard: General, unit: "cfu/g", countable_range: [15, 150] }
+  S_aureus:       { standard: ISO7218, unit: "cfu/g" }
+  Yeast_Molds:    { standard: ISO7218, unit: "cfu/g" }
+  Water_Coliform: { standard: General, unit: "MPN/100ml" }
