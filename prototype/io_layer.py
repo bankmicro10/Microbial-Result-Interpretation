@@ -227,13 +227,125 @@ def can_write_back(meta) -> bool:
         and "result" in meta.get("pos", {})
 
 
+_SS_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"      # spreadsheetml main
+_REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+_PKG_REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
+
+
+def _col_letter(n: int) -> str:
+    """เลขคอลัมน์ (1-based) → ตัวอักษร A1 (1→A, 27→AA)"""
+    s = ""
+    while n > 0:
+        n, r = divmod(n - 1, 26)
+        s = chr(65 + r) + s
+    return s
+
+
+def _col_num(ref: str) -> int:
+    """A1 ref (เช่น 'AB12') → เลขคอลัมน์ 1-based (0 ถ้าไม่มีส่วนตัวอักษร)"""
+    m = re.match(r"([A-Za-z]+)", ref or "")
+    if not m:
+        return 0
+    n = 0
+    for ch in m.group(1).upper():
+        n = n * 26 + (ord(ch) - 64)
+    return n
+
+
+def _register_ns_from(xml: bytes):
+    """register prefix→uri จาก root element เดิม เพื่อคง prefix ตอน serialize (กันไฟล์เพี้ยน)"""
+    from xml.etree import ElementTree as ET
+    head = xml[:2048].decode("utf-8", "ignore")
+    for m in re.finditer(r'xmlns:([A-Za-z0-9]+)="([^"]+)"', head):
+        ET.register_namespace(m.group(1), m.group(2))
+    m = re.search(r'xmlns="([^"]+)"', head)
+    if m:
+        ET.register_namespace("", m.group(1))
+
+
+def _first_sheet_part(zf) -> str:
+    """หา path ของ worksheet แรก (active) ผ่าน workbook rels — fallback = worksheet แรกใน zip"""
+    from xml.etree import ElementTree as ET
+    names = zf.namelist()
+    try:
+        wb = ET.fromstring(zf.read("xl/workbook.xml"))
+        rels = ET.fromstring(zf.read("xl/_rels/workbook.xml.rels"))
+        first = wb.find(f"{{{_SS_NS}}}sheets/{{{_SS_NS}}}sheet")
+        rid = first.get(f"{{{_REL_NS}}}id")
+        for rel in rels.findall(f"{{{_PKG_REL_NS}}}Relationship"):
+            if rel.get("Id") == rid:
+                tgt = rel.get("Target", "").lstrip("/")                    # absolute (/xl/..) → relative
+                if not tgt.startswith("xl/"):
+                    tgt = "xl/" + tgt                                      # relative-from-xl (worksheets/..)
+                if tgt in names:
+                    return tgt
+    except Exception:      # noqa: BLE001 — fallback หา worksheet แรกใน zip
+        pass
+    for n in names:
+        if n.startswith("xl/worksheets/") and n.endswith(".xml"):
+            return n
+    return "xl/worksheets/sheet1.xml"
+
+
+def _inject_cells_inline(sheet_xml: bytes, cells: dict) -> bytes:
+    """เขียนค่า inline string ลง sheet xml โดยไม่แตะ part อื่น (คง form control/drawing).
+    cells: {(row_1based, col_1based): value_str}. ค่าเป็น string → Excel ไม่แปลง 1.4E+03 เป็นเลข"""
+    from xml.etree import ElementTree as ET
+    _register_ns_from(sheet_xml)
+    q = lambda t: f"{{{_SS_NS}}}{t}"                                       # noqa: E731
+    root = ET.fromstring(sheet_xml)
+    sheet_data = root.find(q("sheetData"))
+    if sheet_data is None:
+        return sheet_xml
+
+    rows = {int(r.get("r")): r for r in sheet_data.findall(q("row")) if r.get("r")}
+    by_row: dict[int, dict[int, str]] = {}
+    for (rnum, cnum), val in cells.items():
+        by_row.setdefault(rnum, {})[cnum] = val
+
+    for rnum in sorted(by_row):
+        row_el = rows.get(rnum)
+        if row_el is None:                                                # แถวไม่มี → สร้าง + แทรกตามลำดับ r
+            row_el = ET.Element(q("row")); row_el.set("r", str(rnum))
+            kids = list(sheet_data)
+            idx = sum(1 for k in kids if int(k.get("r", "0")) < rnum)
+            sheet_data.insert(idx, row_el)
+            rows[rnum] = row_el
+
+        existing = {c.get("r"): c for c in row_el.findall(q("c"))}
+        for cnum in sorted(by_row[rnum]):
+            ref, val = f"{_col_letter(cnum)}{rnum}", by_row[rnum][cnum]
+            cell = existing.get(ref)
+            if cell is None:                                              # เซลล์ไม่มี → สร้าง + สืบทอด style เพื่อนซ้าย (คงเส้นตาราง)
+                cell = ET.Element(q("c")); cell.set("r", ref)
+                left = [k for k in row_el if 0 < _col_num(k.get("r", "")) < cnum]
+                if left and left[-1].get("s"):
+                    cell.set("s", left[-1].get("s"))
+                idx = sum(1 for k in row_el if 0 < _col_num(k.get("r", "")) < cnum)
+                row_el.insert(idx, cell)
+            else:                                                         # เซลล์มี → ล้างค่าเดิม คง attribute/style
+                for ch in list(cell):
+                    cell.remove(ch)
+                cell.attrib.pop("t", None)
+            cell.set("t", "inlineStr")
+            is_el = ET.SubElement(cell, q("is"))
+            t_el = ET.SubElement(is_el, q("t"))
+            t_el.text = val
+            if val != val.strip():
+                t_el.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+
+    body = ET.tostring(root, encoding="unicode").encode("utf-8")
+    return b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n' + body
+
+
 def write_back_template(out_df: pd.DataFrame, meta: dict, dest):
-    """เขียน calculated/result/remark กลับลงไฟล์ฟอร์มเดิม (คงเลย์เอาต์ทุกอย่าง).
+    """เขียน calculated/result/remark กลับลงไฟล์ฟอร์มเดิม (คงเลย์เอาต์ + form control/checkbox).
+    แก้เฉพาะ sheet xml ในไฟล์ zip — part อื่น (ctrlProps/vmlDrawing/drawing/media) copy byte-for-byte.
     dest = path หรือ file-like (BytesIO). out_df ต้องเรียงแถวตรงกับ meta['src_rows']"""
-    import openpyxl
+    import zipfile
     pos, src_rows = meta["pos"], meta["src_rows"]
-    wb = openpyxl.load_workbook(meta["path"])
-    ws = wb.active
+
+    cells: dict[tuple[int, int], str] = {}
     for i, src in enumerate(src_rows):
         if i >= len(out_df):
             break
@@ -242,6 +354,16 @@ def write_back_template(out_df: pd.DataFrame, meta: dict, dest):
             if col in pos:
                 val = row.get(col, "")
                 if pd.notna(val) and str(val).strip():
-                    cell = ws.cell(row=src + 1, column=pos[col] + 1, value=str(val))
-                    cell.number_format = "@"          # text — กัน Excel แปลง 1.4E+03 เป็นตัวเลข
-    wb.save(dest)
+                    cells[(src + 1, pos[col] + 1)] = str(val)             # (row,col) 1-based
+
+    with zipfile.ZipFile(meta["path"]) as zin:
+        names = zin.namelist()
+        infos = {info.filename: info for info in zin.infolist()}          # คง compress_type/metadata เดิม
+        data = {n: zin.read(n) for n in names}
+        sheet_part = _first_sheet_part(zin)
+
+    data[sheet_part] = _inject_cells_inline(data[sheet_part], cells)
+
+    with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as zout:
+        for n in names:
+            zout.writestr(infos[n], data[n])
