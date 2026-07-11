@@ -33,9 +33,16 @@ cd prototype && python -m pytest -q     # 37 passed
 - Workflow อนุมัติ required (Draft→Submitted→Approved/Rejected + audit trail)
 
 ## สถานะปัจจุบัน / งานที่เหลือ
-เสร็จ: engine, I/O + template adapter (LF07-05-22), web UI ครบ flow, write-back ลงฟอร์ม, 37 tests
-เหลือ: **UI redesign** (กำลังเลือกดีไซน์ — โทนเขียว CPF, Variant A card/stepper vs B enterprise/แท็บ),
-Petrifilm (LM 7.2-04, 2 บล็อก analyte), FDA out-of-range→EAPC เต็ม, DB + auth/role แทน in-memory store
+เสร็จ: engine, I/O + template adapter (LF07-05-22), web UI ครบ flow + โทนเขียว CPF + stepper,
+write-back ลงฟอร์ม (คง checkbox), 41 tests, **auth (username/password + Google OAuth) + DB (SQLAlchemy) แทน in-memory**,
+พร้อม deploy **Vercel serverless** (state ใน DB, ไฟล์เก็บใน DB, session ผ่าน cookie)
+เหลือ: Petrifilm (LM 7.2-04, 2 บล็อก analyte), FDA out-of-range→EAPC เต็ม, role-based (ตอนนี้ batch scope = owner)
+
+## Auth / DB / Deploy (Vercel)
+- `webapp/models.py` (User, Batch — เก็บ orig_bytes+result_json+audit ใน DB), `webapp/auth.py` (Flask-Login + Authlib Google)
+- `app.py` = `create_app()`; config จาก env: `SECRET_KEY`, `DATABASE_URL` (ว่าง→SQLite `webapp/local.db` สำหรับ dev), `GOOGLE_CLIENT_ID/SECRET` (ว่าง→ซ่อนปุ่ม Google)
+- serverless entry `api/index.py` + `vercel.json`; download = re-run pipeline จาก orig_bytes (stateless) ; **คู่มือตั้งค่า = `DEPLOY_VERCEL.md`**
+- password ใช้ `pbkdf2:sha256` (LibreSSL build ไม่มี scrypt); Flask ต้องส่ง `instance_path/root_path` + `app.run(load_dotenv=False)` กัน `os.getcwd()` ล้มใน sandbox
 
 ## หมายเหตุ
 - macOS: อย่าวางโปรเจกต์ใน ~/Downloads, ~/Desktop, ~/Documents (TCC block preview) — ใช้ที่อื่น เช่น ~/MicrobialCalcuation

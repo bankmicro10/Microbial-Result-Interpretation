@@ -9,6 +9,9 @@ env/
 # app runtime
 webapp/uploads/*
 !webapp/uploads/.gitkeep
+webapp/local.db
+.env
+.vercel/
 
 # OS / editor
 .DS_Store

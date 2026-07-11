@@ -1,0 +1,17 @@
+# ลดขนาด serverless bundle — ไม่รวมไฟล์ที่ไม่ได้ใช้ตอนรัน
+Requirement/
+*.png
+SETUP.md
+sync-preview.sh
+run.sh
+run.bat
+.pytest_cache/
+.claude/
+prototype/test_*.py
+prototype/run_demo.py
+prototype/README.md
+prototype/method_config.yaml
+webapp/sample_*.xlsx
+webapp/uploads/
+webapp/local.db
+DEPLOY_VERCEL.md

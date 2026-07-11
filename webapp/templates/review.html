@@ -7,7 +7,7 @@
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
     <div>
       <h2 style="margin:0 0 6px">{{ b.filename }}</h2>
-      <span class="muted">มาตรฐาน <b>{{ b.standard }}</b> · V={{ b.V }} · n={{ b.n_per }} · ช่วงนับ {{ b.range[0] }}–{{ b.range[1] }}</span>
+      <span class="muted">มาตรฐาน <b>{{ b.standard }}</b> · V={{ b.v }} · n={{ b.n_per }} · ช่วงนับ {{ b.range_lo }}–{{ b.range_hi }}</span>
     </div>
     <span class="pill {{ b.status }}">{{ b.status }}</span>
   </div>
