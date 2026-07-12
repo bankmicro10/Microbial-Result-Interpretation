@@ -39,6 +39,8 @@ git push       # ถ้ายังไม่มี remote: สร้าง repo 
    | `DATABASE_URL` | connection string จาก Neon (ขั้น 2) |
    | `GOOGLE_CLIENT_ID` | จากขั้น 3 |
    | `GOOGLE_CLIENT_SECRET` | จากขั้น 3 |
+   | `SEED_USERNAME` | `cpffoodlab` (user เริ่มต้น — สร้างอัตโนมัติครั้งแรก) |
+   | `SEED_PASSWORD` | รหัสผ่านที่คุณกำหนด (ตั้งใน env เท่านั้น อย่าเขียนลงไฟล์ใน repo) |
 4. กด **Deploy** → ได้ URL `https://<your-app>.vercel.app`
 5. กลับไปขั้น 3 ข้อ 3 แก้ **redirect URI** ให้ตรง domain จริง (ถ้ายังไม่ได้ใส่) → Save
 

@@ -61,7 +61,22 @@ def create_app() -> Flask:
     app.register_blueprint(auth_bp)
     with app.app_context():
         db.create_all()
+        _seed_user()
     return app
+
+
+def _seed_user():
+    """สร้าง user เริ่มต้นจาก env (idempotent) — เก็บ password ไว้ใน env ไม่ commit ลง repo
+    SEED_USERNAME (ดีฟอลต์ cpffoodlab) + SEED_PASSWORD (ต้องตั้ง ไม่งั้นข้าม)"""
+    from models import User
+    uname = os.environ.get("SEED_USERNAME", "cpffoodlab")
+    pw = os.environ.get("SEED_PASSWORD")
+    if not pw or db.session.query(User).filter_by(username=uname).first():
+        return
+    u = User(username=uname, email=os.environ.get("SEED_EMAIL"))
+    u.set_password(pw)
+    db.session.add(u)
+    db.session.commit()
 
 
 app = create_app()
