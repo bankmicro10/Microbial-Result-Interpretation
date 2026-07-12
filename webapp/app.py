@@ -168,7 +168,8 @@ def review(bid):
     b = _owned_batch(bid)
     data = json.loads(b.result_json)
     return render_template("review.html", b=b, rows=data["rows"],
-                           columns=data["columns"], special=SPECIAL_TOKENS)
+                           columns=data["columns"], special=SPECIAL_TOKENS,
+                           editable=(b.status != "Approved"))
 
 
 @app.route("/batch/<bid>/<action>", methods=["POST"])
@@ -187,17 +188,54 @@ def decide(bid, action):
     return redirect(url_for("review", bid=bid))
 
 
+@app.route("/batch/<bid>/edit", methods=["POST"])
+@login_required
+def edit_cell(bid):
+    """แก้ค่า Calculated/Result แบบ manual (double-click ที่หน้า review) — บันทึกลง result_json"""
+    b = _owned_batch(bid)
+    if b.status == "Approved":                           # อนุมัติแล้ว ล็อกไม่ให้แก้
+        return {"ok": False, "error": "อนุมัติแล้ว แก้ไม่ได้"}, 403
+    p = request.get_json(silent=True) or {}
+    row, col = p.get("row"), p.get("col")
+    val = "" if p.get("value") is None else str(p.get("value")).strip()
+    if col not in ("calculated", "result") or not isinstance(row, int):
+        return {"ok": False, "error": "bad request"}, 400
+    data = json.loads(b.result_json)
+    if not (0 <= row < len(data["rows"])):
+        return {"ok": False, "error": "row out of range"}, 400
+    old = data["rows"][row].get(col, "")
+    data["rows"][row][col] = val
+    b.result_json = json.dumps(data, ensure_ascii=False)
+    b.add_audit("Manual edit", current_user.username, f"{col}[{row}]: {old!r} → {val!r}")
+    db.session.commit()
+    return {"ok": True, "value": val}
+
+
 @app.route("/batch/<bid>/download")
 @login_required
 def download(bid):
     b = _owned_batch(bid)
-    result_df, meta = _run_pipeline(b.orig_bytes, b.filename, b.standard, b.v, b.n_per, b.rng)
+    data = json.loads(b.result_json)                     # ใช้ค่าที่อาจถูกแก้มือ (ไม่ใช่คำนวณใหม่)
+    edited_df = pd.DataFrame(data["rows"]).reindex(columns=data["columns"]).fillna("")
+
+    # เขียน orig_bytes ลงไฟล์ชั่วคราว แล้วคงไว้จน write-back เสร็จ (write_back เปิด meta["path"] ซ้ำ)
+    suffix = os.path.splitext(b.filename)[1] or ".xlsx"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tf:
+        tf.write(b.orig_bytes)
+        path = tf.name
     buf = io.BytesIO()
-    if can_write_back(meta):                             # เขียนกลับลงฟอร์มเดิม คงเลย์เอาต์/checkbox
-        write_back_template(result_df, meta, buf)
-    else:                                                # fallback: คอลัมน์ canonical
-        with pd.ExcelWriter(buf, engine="openpyxl") as w:
-            result_df.to_excel(w, index=False)
+    try:
+        meta = read_input(path).attrs.get("template")    # meta["path"] = path (ยังไม่ถูกลบ)
+        if can_write_back(meta):                          # เขียนกลับลงฟอร์มเดิม คงเลย์เอาต์/checkbox
+            write_back_template(edited_df, meta, buf)
+        else:                                             # fallback: คอลัมน์ canonical
+            with pd.ExcelWriter(buf, engine="openpyxl") as w:
+                edited_df.to_excel(w, index=False)
+    finally:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
     buf.seek(0)
     name = os.path.splitext(b.filename)[0] + "_result.xlsx"
     return send_file(buf, as_attachment=True, download_name=name,
