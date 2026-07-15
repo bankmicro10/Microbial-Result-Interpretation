@@ -8,7 +8,9 @@ SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DST="${MICROBIAL_PREVIEW_DIR:-$HOME/.microbial-preview}"
 
 mkdir -p "$DST"
+# --exclude '*.db': local.db = runtime state ของ mirror เอง ห้าม copy ทับ (จะกลาย readonly)
 rsync -a --delete --exclude '__pycache__' --exclude '*.pyc' --exclude 'uploads/*' \
+  --exclude '*.db' --exclude '*.db-journal' --exclude '*.db-wal' \
   "$SRC/webapp/"    "$DST/webapp/"
 rsync -a --delete --exclude '__pycache__' --exclude '*.pyc' \
   "$SRC/prototype/" "$DST/prototype/"
