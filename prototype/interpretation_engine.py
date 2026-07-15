@@ -95,17 +95,15 @@ def interpret_iso(readings: list[Reading], std: dict, V=1.0, n_per=1) -> Result:
     d_lowest = max(r.d for r in rs)                  # เจือจางน้อยสุด (d มากสุด)
     d_last = min(r.d for r in rs)                    # เจือจางมากสุด (d น้อยสุด)
 
-    def weighted(i, estimate=False):
-        """สูตรถ่วงน้ำหนัก โดย d1 = rs[i] (ในช่วง/4-9), d2 = ชั้นถัดไปที่ติดกัน"""
+    def weighted(i):
+        """สูตร ISO: d1 = rs[i], d2 = ชั้นถัดไปที่ติดกัน (นับ 'ทุกโคโลนี' ไม่สนช่วง)
+        n1/n2 = จำนวน plate ของแต่ละชั้น (= n_per) — ไม่ขึ้นกับว่า count อยู่ในช่วงหรือไม่"""
         d1 = rs[i]
         d2 = rs[i + 1] if i + 1 < len(rs) else None
-        sc = d1.count + (d2.count if (d2 and isinstance(d2.count, int)) else 0)
-        n1 = n_per
-        if estimate:                                 # เคส 4-9: นับ d2 ถ้ามีค่า numeric
-            n2 = n_per if (d2 and isinstance(d2.count, int)) else 0
-        else:                                        # general: นับ d2 เฉพาะถ้าอยู่ในช่วง 10-150
-            n2 = n_per if (d2 and cls(d2.count) == "count") else 0
-        return sc / (V * (n1 + 0.1 * n2) * d1.d)
+        d2num = d2 is not None and isinstance(d2.count, int)
+        sc = d1.count + (d2.count if d2num else 0)
+        n2 = n_per if d2num else 0                    # มี d2 (plate ถัดไป) → นับ n2 เสมอ
+        return sc / (V * (n_per + 0.1 * n2) * d1.d)
 
     # 1) General case — มี dilution ในช่วง 10-150 (ใช้ตัวเข้มข้นสุดที่อยู่ในช่วงเป็น d1)
     if "count" in kinds:
@@ -117,7 +115,7 @@ def interpret_iso(readings: list[Reading], std: dict, V=1.0, n_per=1) -> Result:
 
     # 2) Special 4-9 → estimate
     if "est" in kinds:
-        val = weighted(kinds.index("est"), estimate=True)
+        val = weighted(kinds.index("est"))
         return Result(format_report(val, std) + " est.", [round(val)])
 
     # 3) ทุกชั้น >150 (numeric หรือ TNTC token) → > 150/(V·d_last)
