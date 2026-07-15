@@ -164,26 +164,8 @@ def process(df: pd.DataFrame, standard: str, V=1.0, n_per=1, range_override=None
     df["_c"] = df["count"].map(parse_count)
 
     for (base, analyte), grp in df.groupby(["_base", "analyte"], sort=False):
-        # เติม calculated: แถวในช่วงนับ = count/DF; ถ้าไม่มีแถวในช่วง → เติมแถวที่นำมาแปล (est./TNTC/ไม่พบ)
-        in_range = [(idx, r["_c"], r["_d"]) for idx, r in grp.iterrows()
-                    if isinstance(r["_c"], int) and r["_d"] and lo <= r["_c"] <= hi]
-        if in_range:
-            for idx, c, d in in_range:
-                df.at[idx, "calculated"] = round(c / d)
-        else:
-            ints = [(idx, r["_c"], r["_d"]) for idx, r in grp.iterrows()
-                    if isinstance(r["_c"], int) and r["_d"]]
-            non_zero = [(idx, c, d) for idx, c, d in ints if c > 0]
-            first = grp.index[0]
-            if all(r["_c"] == TNTC for _, r in grp.iterrows()):
-                df.at[first, "calculated"] = "TNTC"
-            elif non_zero:                                   # นอกช่วงทุก dilution → count/DF ของแถวที่ใช้
-                idx, c, d = max(non_zero, key=lambda t: t[1])
-                df.at[idx, "calculated"] = round(c / d)
-            else:                                            # ไม่พบตั้งแต่แรก → <1/d
-                lowest_d = max((r["_d"] for _, r in grp.iterrows() if r["_d"]), default=1)
-                df.at[first, "calculated"] = "<" + str(int(1 / lowest_d))
-
+        first = grp.index[0]
+        # ---- แปลผล ----
         reps = sorted(grp["_rep"].unique())
         if standard == "General":
             replicates = [
@@ -203,10 +185,33 @@ def process(df: pd.DataFrame, standard: str, V=1.0, n_per=1, range_override=None
                         if r["_d"] is not None and r["_c"] is not None]
             res = interpret_iso(readings, std, V=V, n_per=n_per)
 
-        first = grp.index[0]
         df.at[first, "result"] = res.result
         if res.remark:
             df.at[first, "remark"] = res.remark
+
+        # ---- เติมคอลัมน์ calculated ----
+        if standard == "ISO7218":
+            # ISO = ค่า N เดียวต่อ sample (สูตร SC/(V[n1+0.1n2]d)) → วางที่แถวผล
+            if res.calculated:
+                df.at[first, "calculated"] = res.calculated[0]
+        else:
+            # General/FDA: calculated ต่อ plate (count/DF) สำหรับแถวในช่วง
+            in_range = [(idx, r["_c"], r["_d"]) for idx, r in grp.iterrows()
+                        if isinstance(r["_c"], int) and r["_d"] and lo <= r["_c"] <= hi]
+            if in_range:
+                for idx, c, d in in_range:
+                    df.at[idx, "calculated"] = round(c / d)
+            else:
+                non_zero = [(idx, r["_c"], r["_d"]) for idx, r in grp.iterrows()
+                            if isinstance(r["_c"], int) and r["_d"] and r["_c"] > 0]
+                if all(r["_c"] == TNTC for _, r in grp.iterrows()):
+                    df.at[first, "calculated"] = "TNTC"
+                elif non_zero:                               # นอกช่วงทุก dilution → count/DF ของแถวที่ใช้
+                    idx, c, d = max(non_zero, key=lambda t: t[1])
+                    df.at[idx, "calculated"] = round(c / d)
+                else:                                        # ไม่พบตั้งแต่แรก → <1/d
+                    lowest_d = max((r["_d"] for _, r in grp.iterrows() if r["_d"]), default=1)
+                    df.at[first, "calculated"] = "<" + str(int(1 / lowest_d))
 
         # safeguard: มี suffix No.X แต่ base นี้มี rep เดียว → ไม่พบคู่ duplicate (มักเกิดจาก base พิมพ์ผิด)
         marker_reps = sorted({rp for rp, has in zip(grp["_rep"], grp["_hasrep"]) if has})

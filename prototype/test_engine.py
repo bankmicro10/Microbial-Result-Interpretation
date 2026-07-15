@@ -37,6 +37,19 @@ def test_case6_tntc_then_countable():
     r = interpret_iso([Reading(0.01, TNTC), Reading(0.001, 120)], ISO)
     assert r.result == "1.2E+05 est."
 
+def test_iso_numeric_over150_not_tntc():
+    # 189>150 = นอกช่วง (ไม่ใช่ TNTC) → ใช้ 0.01(18) เป็น d1, general case ไม่ใช่ est
+    # SC = 18+5 = 23, n2=0 (5 ไม่อยู่ 10-150) → 23/(1·1·0.01) = 2300 → 2.3E+03
+    r = interpret_iso([Reading(0.1, 189), Reading(0.01, 18), Reading(0.001, 5)], ISO)
+    assert r.result == "2.3E+03"
+    assert r.calculated == [2300]
+
+def test_iso_over150_lowest_readable_next():
+    # ชั้นเข้มข้นสุด numeric >150, ชั้นในช่วงถัดมา, d2 ก็ในช่วง → general (n2 นับ)
+    r = interpret_iso([Reading(0.1, 200), Reading(0.01, 120), Reading(0.001, 14)], ISO)
+    # d1=120@0.01, d2=14@0.001 (in range → n2=1): (120+14)/(1·1.1·0.01)=12181.8 → 1.2E+04
+    assert r.result == "1.2E+04"
+
 
 # ---- FDA BAM ----
 def test_case7_fda_weighted_average():

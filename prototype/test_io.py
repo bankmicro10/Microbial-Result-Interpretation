@@ -47,7 +47,7 @@ def test_end_to_end_roundtrip(tmp_path):
     back = read_input(str(f_out))
     # scientific string ต้องไม่ถูกแปลงเป็น float ตอน round-trip
     assert back.loc[0, "result"] == "1.4E+04"
-    assert str(back.loc[0, "calculated"]) == "13500"
+    assert str(back.loc[0, "calculated"]) == "13545"    # ISO = ค่า N เดียว (SC/(V[n1+0.1n2]d)) ไม่ใช่ per-plate
 
     f_gen = tmp_path / "in_gen.xlsx"
     inp.iloc[2:].to_excel(f_gen, index=False)

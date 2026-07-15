@@ -71,44 +71,72 @@ class Result:
 
 # ---------------------------------------------------------------- ISO 7218
 def interpret_iso(readings: list[Reading], std: dict, V=1.0, n_per=1) -> Result:
+    """ISO 7218:2024 — N = SC/(V×[n1+0.1×n2]×d) โดยใช้ dilution ที่อยู่ในช่วง 10-150 เป็นหลัก
+    numeric >150 = นอกช่วง (ข้าม) ไม่ใช่ TNTC; เฉพาะ token TNTC เท่านั้นที่ทำให้ชั้นถัดไปเป็น estimate"""
     lo, hi = std["countable_range"]                  # 10..150
-    lowest_d = max(r.d for r in readings)            # dilution ต่ำสุด (เจือจางน้อยสุด)
-    highest_d = min(r.d for r in readings)
-    nums = [r for r in readings if isinstance(r.count, int)]
-    countable = [r for r in nums if lo <= r.count <= hi]
-    est = [r for r in nums if 4 <= r.count <= 9]
-    low = [r for r in nums if 1 <= r.count <= 3]
-    all_tntc = all(is_tntc(r.count) for r in readings)
-    all_zero = bool(nums) and all(r.count == 0 for r in nums)
+    rs = sorted(readings, key=lambda r: r.d, reverse=True)   # เข้มข้นสุด (d มาก) → เจือจางสุด
 
-    if countable:
-        lowest_is_tntc = any(is_tntc(r.count) for r in readings if r.d == lowest_d)
-        C = sum(r.count for r in countable)
-        if lowest_is_tntc:  # TNTC ชั้นต่ำสุด แล้วชั้นถัดไปนับได้ → estimate
-            val = C / (V * (0 + 0.1 * n_per) * lowest_d)
-            return Result(format_report(val, std) + " est.", [round(val)])
-        d_first = max(r.d for r in countable)
-        n1, n2 = n_per, (n_per if len(countable) > 1 else 0)
-        val = C / (V * (n1 + 0.1 * n2) * d_first)
-        return Result(format_report(val, std), [round(val)])
+    def cls(c):
+        if c == TNTC:
+            return "tntc"                            # token จริงเท่านั้น
+        if not isinstance(c, int):
+            return "na"
+        if c > hi:
+            return "over"                            # numeric >150 = นอกช่วงสูง (ข้าม)
+        if lo <= c <= hi:
+            return "count"                           # 10-150
+        if 4 <= c <= 9:
+            return "est"
+        if 1 <= c <= 3:
+            return "low"
+        return "zero"                                # 0
 
-    if est:                                          # 4–9 → estimate
-        C = sum(r.count for r in nums)
-        n1, n2 = n_per, (n_per if len(nums) > 1 else 0)
-        val = C / (V * (n1 + 0.1 * n2) * lowest_d)
+    kinds = [cls(r.count) for r in rs]
+    d_lowest = max(r.d for r in rs)                  # เจือจางน้อยสุด (d มากสุด)
+    d_last = min(r.d for r in rs)                    # เจือจางมากสุด (d น้อยสุด)
+
+    def weighted(i, estimate=False):
+        """สูตรถ่วงน้ำหนัก โดย d1 = rs[i] (ในช่วง/4-9), d2 = ชั้นถัดไปที่ติดกัน"""
+        d1 = rs[i]
+        d2 = rs[i + 1] if i + 1 < len(rs) else None
+        sc = d1.count + (d2.count if (d2 and isinstance(d2.count, int)) else 0)
+        n1 = n_per
+        if estimate:                                 # เคส 4-9: นับ d2 ถ้ามีค่า numeric
+            n2 = n_per if (d2 and isinstance(d2.count, int)) else 0
+        else:                                        # general: นับ d2 เฉพาะถ้าอยู่ในช่วง 10-150
+            n2 = n_per if (d2 and cls(d2.count) == "count") else 0
+        return sc / (V * (n1 + 0.1 * n2) * d1.d)
+
+    # 1) General case — มี dilution ในช่วง 10-150 (ใช้ตัวเข้มข้นสุดที่อยู่ในช่วงเป็น d1)
+    if "count" in kinds:
+        i = kinds.index("count")
+        val = weighted(i)
+        est = i > 0 and kinds[i - 1] == "tntc"       # ชั้นเข้มข้นกว่าเป็น TNTC token → estimate (1.1.1.6)
+        suffix = " est." if est else ""
+        return Result(format_report(val, std) + suffix, [round(val)])
+
+    # 2) Special 4-9 → estimate
+    if "est" in kinds:
+        val = weighted(kinds.index("est"), estimate=True)
         return Result(format_report(val, std) + " est.", [round(val)])
 
-    if low:                                          # 1–3 → < 4/(V·d)
-        val = 4 / (V * lowest_d)
-        return Result("<" + format_report(val, std))
+    # 3) ทุกชั้น >150 (numeric หรือ TNTC token) → > 150/(V·d_last)
+    if all(k in ("over", "tntc") for k in kinds):
+        val = hi / (V * d_last)
+        txt = ">" + format_report(val, std)
+        return Result(txt, [txt])
 
-    if all_tntc:                                     # > 150/(V·d_last)
-        val = 150 / (V * highest_d)
-        return Result(">" + format_report(val, std))
+    # 4) Special 1-3 → < 4/(V·d_lowest)
+    if "low" in kinds:
+        val = 4 / (V * d_lowest)
+        txt = "<" + format_report(val, std)
+        return Result(txt, [txt])
 
-    if all_zero:                                     # ไม่พบ → < 1/(V·d)
-        val = 1 / (V * lowest_d)
-        return Result("<" + format_report(val, std))
+    # 5) ไม่พบ (ทุกชั้น 0) → < 1/(V·d_lowest)
+    if all(k in ("zero", "na") for k in kinds):
+        val = 1 / (V * d_lowest)
+        txt = "<" + format_report(val, std)
+        return Result(txt, [txt])
 
     return Result("N/A")
 
