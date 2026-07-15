@@ -54,3 +54,22 @@ def test_end_to_end_roundtrip(tmp_path):
     outg = process(read_input(str(f_gen)), "General")
     assert outg.iloc[0]["result"] == "1.6E+02"          # duplicate → max
     assert "duplicate=max" in outg.iloc[0]["remark"]
+
+
+def test_iso_duplicate_max():
+    # ISO + duplicate: แปลแยกแต่ละ replicate, Result = สูงสุด, calculated ทั้งสอง replicate
+    rows = [
+        ("EL26-9 No.1", "APC", "0.0001", "260"), ("EL26-9 No.1", "APC", "1e-05", "40"),
+        ("EL26-9 No.1", "APC", "1e-06", "8"),
+        ("EL26-9 No.2", "APC", "0.0001", "305"), ("EL26-9 No.2", "APC", "1e-05", "28"),
+        ("EL26-9 No.2", "APC", "1e-06", "3"),
+    ]
+    inp = pd.DataFrame([(*r, "", "", "") for r in rows],
+                       columns=["lab_code", "analyte", "dilution", "count",
+                                "calculated", "result", "remark"])
+    out = process(inp, "ISO7218", range_override=(10, 150))
+    # No.1: (40+8)/(1·1.1·1e-05)=4363636; No.2: (28+3)/(1·1.1·1e-05)=2818182
+    assert out.iloc[0]["calculated"] == 4363636          # No.1 (แถวแรก)
+    assert out.iloc[3]["calculated"] == 2818182          # No.2 ต้องถูกแปลด้วย
+    assert out.iloc[0]["result"] == "4.4E+06"            # max ของสอง replicate
+    assert "duplicate=max" in out.iloc[0]["remark"]

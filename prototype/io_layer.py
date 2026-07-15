@@ -11,9 +11,21 @@ import re
 import pandas as pd
 
 from interpretation_engine import (
-    Reading, PlateSet, TNTC,
+    Reading, PlateSet, TNTC, Result,
     interpret_iso, interpret_fda, interpret_general, format_report,
 )
+
+
+def _iso_mag(res) -> float:
+    """ค่าตัวเลขของ calculated (หรือ result) เพื่อเทียบหา replicate ที่สูงสุด (ISO duplicate)"""
+    c = res.calculated[0] if res.calculated else res.result
+    if isinstance(c, (int, float)):
+        return float(c)
+    s = str(c).replace(",", "").replace("est.", "").replace("<", "").replace(">", "").strip()
+    try:
+        return float(s.replace("E", "e"))
+    except ValueError:
+        return -1.0
 
 # ---- standard configs (ตรงกับ method_config.yaml) ----
 STANDARDS = {
@@ -180,21 +192,28 @@ def process(df: pd.DataFrame, standard: str, V=1.0, n_per=1, range_override=None
                 if r["_d"] is not None and isinstance(r["_c"], int):
                     platesets.setdefault(r["_d"], []).append(r["_c"])
             res = interpret_fda([PlateSet(d, cs) for d, cs in platesets.items()], std)
-        else:  # ISO7218
-            readings = [Reading(r["_d"], r["_c"]) for _, r in grp.iterrows()
-                        if r["_d"] is not None and r["_c"] is not None]
-            res = interpret_iso(readings, std, V=V, n_per=n_per)
+        else:  # ISO7218 — แปลผลแยกแต่ละ replicate; Result = ค่าสูงสุด, calculated ต่อ replicate
+            rep_res = []
+            for rp in reps:
+                sub = grp[grp["_rep"] == rp]
+                rd = [Reading(r["_d"], r["_c"]) for _, r in sub.iterrows()
+                      if r["_d"] is not None and r["_c"] is not None]
+                if rd:
+                    rep_res.append((sub.index[0], interpret_iso(rd, std, V=V, n_per=n_per)))
+            for idx0, rr in rep_res:                     # calculated ที่แถวแรกของแต่ละ replicate
+                if rr.calculated:
+                    df.at[idx0, "calculated"] = rr.calculated[0]
+            res = max((rr for _, rr in rep_res), key=_iso_mag, default=Result("N/A"))
+            if len(rep_res) > 1 and res.result != "N/A":  # duplicate → เลือกค่าสูงสุด
+                res = Result(res.result, res.calculated,
+                             (res.remark + " | duplicate=max").strip(" |"))
 
         df.at[first, "result"] = res.result
         if res.remark:
             df.at[first, "remark"] = res.remark
 
-        # ---- เติมคอลัมน์ calculated ----
-        if standard == "ISO7218":
-            # ISO = ค่า N เดียวต่อ sample (สูตร SC/(V[n1+0.1n2]d)) → วางที่แถวผล
-            if res.calculated:
-                df.at[first, "calculated"] = res.calculated[0]
-        else:
+        # ---- เติมคอลัมน์ calculated (ISO เติมต่อ replicate ใน branch แล้ว) ----
+        if standard != "ISO7218":
             # General/FDA: calculated ต่อ plate (count/DF) สำหรับแถวในช่วง
             in_range = [(idx, r["_c"], r["_d"]) for idx, r in grp.iterrows()
                         if isinstance(r["_c"], int) and r["_d"] and lo <= r["_c"] <= hi]
