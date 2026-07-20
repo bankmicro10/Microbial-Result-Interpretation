@@ -170,6 +170,10 @@ def process(df: pd.DataFrame, standard: str, V=1.0, n_per=1, range_override=None
         std["countable_range"] = list(range_override)
     lo, hi = std["countable_range"]
     df = df.copy()
+    # pandas ใหม่ (StringDtype) ห้ามใส่ค่า int ลงคอลัมน์ str → บังคับ object dtype ก่อนเขียนผล
+    for _col in ("calculated", "result", "remark"):
+        if _col in df.columns:
+            df[_col] = df[_col].astype(object)
     df["_base"], df["_rep"] = zip(*df["lab_code"].map(_base_lab))
     df["_hasrep"] = df["lab_code"].map(lambda s: bool(_REP_RE.search(str(s))))   # มี suffix No.X จริงไหม
     df["_d"] = df["dilution"].map(parse_dilution)
