@@ -7,7 +7,12 @@
       <label>Username หรือ Email</label>
       <input type="text" name="username" required autofocus>
       <label>Password</label>
-      <input type="password" name="password" required>
+      <div class="pwwrap">
+        <input type="password" name="password" id="pw" required>
+        <button type="button" class="pwtoggle" id="pwtoggle" title="แสดง/ซ่อนรหัสผ่าน" aria-label="แสดง/ซ่อนรหัสผ่าน">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>
+        </button>
+      </div>
       <div style="margin-top:16px"><button class="btn" type="submit">เข้าสู่ระบบ</button></div>
     </form>
     {% if google %}
@@ -17,7 +22,15 @@
       เข้าสู่ระบบด้วย Google
     </a>
     {% endif %}
-    <div class="authlink">ยังไม่มีบัญชี? <a href="{{ url_for('auth.register') }}">สมัครสมาชิก</a></div>
   </div>
 </div>
+<script>
+(function () {
+  var b = document.getElementById("pwtoggle"), pw = document.getElementById("pw");
+  b.addEventListener("click", function () {
+    pw.type = pw.type === "password" ? "text" : "password";
+    b.classList.toggle("on");   // เปลี่ยนสีไอคอนเป็นเขียวเมื่อแสดงรหัส
+  });
+})();
+</script>
 {% endblock %}

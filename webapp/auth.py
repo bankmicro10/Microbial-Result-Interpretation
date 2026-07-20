@@ -59,6 +59,9 @@ def _unique_username(base: str) -> str:
 def register():
     if current_user.is_authenticated:
         return redirect(url_for("index"))
+    if not os.environ.get("ALLOW_REGISTER"):     # ปิดสมัครเอง (fixed users) — admin ตั้ง env นี้เพื่อเปิดชั่วคราว
+        flash("การสมัครสมาชิกถูกปิด — ติดต่อผู้ดูแลระบบเพื่อเพิ่มผู้ใช้")
+        return redirect(url_for("auth.login"))
     if request.method == "POST":
         username = (request.form.get("username") or "").strip()
         email = (request.form.get("email") or "").strip() or None
