@@ -38,8 +38,10 @@ SPECIAL_TOKENS = ("est.", "TNTC", "<", ">")
 
 def _database_url() -> str:
     url = os.environ.get("DATABASE_URL", "").strip()
-    if not url:                                          # dev fallback: SQLite ในเครื่อง
-        return "sqlite:///" + os.path.join(_HERE, "local.db")
+    if not url:
+        # ไม่มี DATABASE_URL → SQLite ใน temp dir (Vercel filesystem read-only ยกเว้น /tmp)
+        # หมายเหตุ: บน serverless นี่คือ ephemeral (ข้อมูลหายทุก cold start) — production ต้องตั้ง DATABASE_URL
+        return "sqlite:///" + os.path.join(tempfile.gettempdir(), "microbial_local.db")
     if url.startswith("postgres://"):                    # Neon/Heroku ใช้ postgres:// → SQLAlchemy ต้อง postgresql://
         url = "postgresql://" + url[len("postgres://"):]
     return url
@@ -56,12 +58,19 @@ def create_app() -> Flask:
         from sqlalchemy.pool import NullPool
         app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {"poolclass": NullPool, "pool_pre_ping": True}
 
-    db.init_app(app)
     init_auth(app)
     app.register_blueprint(auth_bp)
-    with app.app_context():
-        db.create_all()
-        _seed_user()
+    # ห่อทั้ง db.init_app + create_all + seed ด้วย try/except กัน import ล้มทั้งฟังก์ชัน
+    # (Flask-SQLAlchemy 3.x สร้าง engine ตั้งแต่ init_app → URL ผิด/driver พังจะ crash ที่นี่)
+    # ถ้า DB มีปัญหา → log ใน Vercel logs แล้วปล่อยแอปขึ้น (เห็น error ชัดกว่า FUNCTION_INVOCATION_FAILED)
+    try:
+        db.init_app(app)
+        with app.app_context():
+            db.create_all()
+            _seed_user()
+    except Exception as e:  # noqa: BLE001
+        scheme = db_url.split(":", 1)[0]
+        print(f"[startup] DB init failed (scheme={scheme}): {e}", file=sys.stderr)
     return app
 
 

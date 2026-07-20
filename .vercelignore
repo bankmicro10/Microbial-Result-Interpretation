@@ -1,6 +1,7 @@
 # ลดขนาด serverless bundle — ไม่รวมไฟล์ที่ไม่ได้ใช้ตอนรัน
 Requirement/
 *.png
+!webapp/static/cpf-logo.png     # โลโก้ที่แอปเสิร์ฟ — ต้องรวมไว้
 SETUP.md
 sync-preview.sh
 run.sh
