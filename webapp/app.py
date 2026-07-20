@@ -37,7 +37,8 @@ SPECIAL_TOKENS = ("est.", "TNTC", "<", ">")
 
 
 def _database_url() -> str:
-    url = os.environ.get("DATABASE_URL", "").strip()
+    # รับได้ทั้ง DATABASE_URL (ตั้งเอง/Neon) และ POSTGRES_URL (Vercel Storage ตั้งให้อัตโนมัติ)
+    url = (os.environ.get("DATABASE_URL") or os.environ.get("POSTGRES_URL") or "").strip()
     if not url:
         # ไม่มี DATABASE_URL → SQLite ใน temp dir (Vercel filesystem read-only ยกเว้น /tmp)
         # หมายเหตุ: บน serverless นี่คือ ephemeral (ข้อมูลหายทุก cold start) — production ต้องตั้ง DATABASE_URL
