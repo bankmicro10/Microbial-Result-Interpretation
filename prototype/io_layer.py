@@ -178,8 +178,12 @@ def process(df: pd.DataFrame, standard: str, V=1.0, n_per=1, range_override=None
     df["_hasrep"] = df["lab_code"].map(lambda s: bool(_REP_RE.search(str(s))))   # มี suffix No.X จริงไหม
     df["_d"] = df["dilution"].map(parse_dilution)
     df["_c"] = df["count"].map(parse_count)
+    # จับกลุ่มแบบ contiguous block: แต่ละบล็อกของ (base, analyte) ที่ติดกัน = 1 ตัวอย่าง
+    # กัน lab code เดียวกันที่อยู่คนละบล็อก (ไม่ติดกัน) ถูกรวมเป็นก้อนเดียว → แปลผลแค่บล็อกแรก
+    _key = df["_base"].astype(str) + "\x00" + df["analyte"].astype(str)
+    df["_block"] = (_key != _key.shift()).cumsum()
 
-    for (base, analyte), grp in df.groupby(["_base", "analyte"], sort=False):
+    for _blk, grp in df.groupby("_block", sort=False):
         first = grp.index[0]
         # ---- แปลผล ----
         reps = sorted(grp["_rep"].unique())
@@ -243,7 +247,7 @@ def process(df: pd.DataFrame, standard: str, V=1.0, n_per=1, range_override=None
             cur = df.at[first, "remark"]
             df.at[first, "remark"] = f"{cur} | {warn}" if (pd.notna(cur) and str(cur).strip()) else warn
 
-    result = df.drop(columns=["_base", "_rep", "_hasrep", "_d", "_c"])
+    result = df.drop(columns=["_base", "_rep", "_hasrep", "_d", "_c", "_block"])
     result.attrs = dict(df.attrs)                 # คง metadata (template) ผ่าน process
     return result
 
