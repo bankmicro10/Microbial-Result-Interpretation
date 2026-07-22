@@ -371,6 +371,44 @@ def _inject_cells_inline(sheet_xml: bytes, cells: dict) -> bytes:
     return text.encode("utf-8")
 
 
+# footer ของฟอร์ม LF07 (legend + ลงชื่อ + FILE/REV) — ใส่เป็น page footer ให้โผล่ทุกหน้าเวลาพิมพ์
+_LF07_FOOTER = (
+    "Remark : TNTC = Too Numerous To Count, N = Not detected, est. = Estimate count\n"
+    "Reported by ___________     Approved by ___________     Date ___/___/___\n"
+    "FILE : LF07-05-22.xls     REV. 2/01-04-25"
+)
+
+
+def _apply_print_layout(data: dict, sheet_part: str, header_last_row: int):
+    """เพิ่ม Print Titles (ทำซ้ำแถวหัวทุกหน้า) + page footer ลงในไฟล์ (surgical XML)
+    header_last_row = แถวสุดท้ายของส่วนหัว (1-based). ถ้ามี headerFooter/Print_Titles อยู่แล้ว ข้าม"""
+    # 1) page footer → sheet xml (แทรกหลัง <pageSetup .../> ตาม schema order)
+    sx = data[sheet_part].decode("utf-8")
+    if "<headerFooter" not in sx:
+        foot = (_LF07_FOOTER.replace("&", "&amp;").replace("<", "&lt;")
+                .replace(">", "&gt;").replace("\n", "&#10;"))
+        hf = f"<headerFooter><oddFooter>&amp;L&amp;7{foot}</oddFooter></headerFooter>"
+        m = re.search(r"<pageSetup\b[^>]*/>", sx)
+        if m:
+            sx = sx[:m.end()] + hf + sx[m.end():]
+            data[sheet_part] = sx.encode("utf-8")
+
+    # 2) Print_Titles → workbook.xml (definedName, localSheetId=0 = sheet แรก)
+    wbp = "xl/workbook.xml"
+    if wbp in data and header_last_row >= 1:
+        wb = data[wbp].decode("utf-8")
+        if "_xlnm.Print_Titles" not in wb:
+            m = re.search(r'<sheet\b[^>]*\bname="([^"]*)"', wb)
+            name = (m.group(1) if m else "Sheet1").replace("'", "''")
+            dn = (f'<definedName name="_xlnm.Print_Titles" localSheetId="0">'
+                  f"'{name}'!$1:${header_last_row}</definedName>")
+            if "<definedNames>" in wb:                # มี block อยู่แล้ว → แทรกเพิ่ม
+                wb = wb.replace("<definedNames>", "<definedNames>" + dn, 1)
+            else:                                     # ยังไม่มี → สร้างหลัง </sheets>
+                wb = re.sub(r"(</sheets>)", r"\1<definedNames>" + dn + "</definedNames>", wb, count=1)
+            data[wbp] = wb.encode("utf-8")
+
+
 def write_back_template(out_df: pd.DataFrame, meta: dict, dest):
     """เขียน calculated/result/remark กลับลงไฟล์ฟอร์มเดิม (คงเลย์เอาต์ + form control/checkbox).
     แก้เฉพาะ sheet xml ในไฟล์ zip — part อื่น (ctrlProps/vmlDrawing/drawing/media) copy byte-for-byte.
@@ -397,6 +435,8 @@ def write_back_template(out_df: pd.DataFrame, meta: dict, dest):
         sheet_part = _first_sheet_part(zin)
 
     data[sheet_part] = _inject_cells_inline(data[sheet_part], cells)
+    if src_rows:                                     # ทำซ้ำหัว + footer ทุกหน้า (multi-page)
+        _apply_print_layout(data, sheet_part, header_last_row=src_rows[0])
 
     with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as zout:
         for n in names:
