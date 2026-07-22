@@ -8,6 +8,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
 import sys
 import tempfile
 import uuid
@@ -192,7 +193,13 @@ def upload():
 def review(bid):
     b = _owned_batch(bid)
     data = json.loads(b.result_json)
-    return render_template("review.html", b=b, rows=data["rows"],
+    rows = data["rows"]
+    # เส้นแบ่งระหว่าง Lab No. ที่ต่างกัน (base ตัด suffix No.X) → True = แถวสุดท้ายของ Lab No. นั้น
+    def _lab_base(lc):
+        return re.sub(r"\s*N[o0]\.?\s*\d+\s*$", "", str(lc), flags=re.I).strip()
+    dividers = [(i + 1 >= len(rows)) or (_lab_base(r.get("lab_code", "")) != _lab_base(rows[i + 1].get("lab_code", "")))
+                for i, r in enumerate(rows)]
+    return render_template("review.html", b=b, rows=rows, dividers=dividers,
                            columns=data["columns"], special=SPECIAL_TOKENS,
                            editable=(b.status != "Approved"))
 
@@ -216,24 +223,44 @@ def decide(bid, action):
 @app.route("/batch/<bid>/edit", methods=["POST"])
 @login_required
 def edit_cell(bid):
-    """แก้ค่า Calculated/Result แบบ manual (double-click ที่หน้า review) — บันทึกลง result_json"""
+    """แก้ค่า count/calculated/result แบบ manual (double-click) — บันทึกลง result_json
+    - แก้ count → คำนวณ + แปลผลใหม่ทั้ง batch ตาม count ใหม่
+    - เหตุผลการแก้ไข (reason) → ใส่ในช่องหมายเหตุ (remark) ของแถวที่แก้"""
     b = _owned_batch(bid)
     if b.status == "Approved":                           # อนุมัติแล้ว ล็อกไม่ให้แก้
         return {"ok": False, "error": "อนุมัติแล้ว แก้ไม่ได้"}, 403
     p = request.get_json(silent=True) or {}
     row, col = p.get("row"), p.get("col")
     val = "" if p.get("value") is None else str(p.get("value")).strip()
-    if col not in ("calculated", "result") or not isinstance(row, int):
+    reason = (p.get("reason") or "").strip()
+    if col not in ("count", "calculated", "result") or not isinstance(row, int):
         return {"ok": False, "error": "bad request"}, 400
     data = json.loads(b.result_json)
-    if not (0 <= row < len(data["rows"])):
+    rows = data["rows"]
+    if not (0 <= row < len(rows)):
         return {"ok": False, "error": "row out of range"}, 400
-    old = data["rows"][row].get(col, "")
-    data["rows"][row][col] = val
+    old = rows[row].get(col, "")
+    rows[row][col] = val
+
+    recalced = False
+    if col == "count":                                   # แก้ count → คำนวณ/แปลผลใหม่ทั้ง batch
+        indf = pd.DataFrame(rows)[["lab_code", "analyte", "dilution", "count"]].copy()
+        for _c in ("calculated", "result", "remark"):
+            indf[_c] = ""
+        newdf = process(indf, b.standard, V=b.v, n_per=b.n_per, range_override=b.rng)
+        rows = newdf.fillna("").to_dict("records")
+        data["columns"] = list(newdf.columns)
+        recalced = True
+
+    if reason:                                           # เหตุผล → ช่องหมายเหตุของแถวที่แก้
+        cur = str(rows[row].get("remark", "") or "").strip()
+        rows[row]["remark"] = f"{cur} | {reason}" if cur else reason
+    data["rows"] = rows
     b.result_json = json.dumps(data, ensure_ascii=False)
-    b.add_audit("Manual edit", current_user.username, f"{col}[{row}]: {old!r} → {val!r}")
+    b.add_audit("Manual edit", current_user.username,
+                f"{col}[{row}]: {old!r} → {val!r}" + (f" | เหตุผล: {reason}" if reason else ""))
     db.session.commit()
-    return {"ok": True, "value": val}
+    return {"ok": True, "value": val, "reload": recalced}
 
 
 @app.route("/batch/<bid>/download")

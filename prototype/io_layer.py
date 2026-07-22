@@ -383,7 +383,8 @@ def write_back_template(out_df: pd.DataFrame, meta: dict, dest):
         if i >= len(out_df):
             break
         row = out_df.iloc[i]
-        for col in ("calculated", "result", "remark"):
+        # เขียน count ด้วย (เผื่อถูกแก้มือ) + calculated/result/remark
+        for col in ("count", "calculated", "result", "remark"):
             if col in pos:
                 val = row.get(col, "")
                 if pd.notna(val) and str(val).strip():

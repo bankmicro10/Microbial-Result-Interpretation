@@ -21,10 +21,10 @@
       {% set rowidx = loop.index0 %}
       {% set res = (r.result or '')|string %}
       {% set flag = res and (res.endswith('est.') or 'TNTC' in res or res.startswith('<') or res.startswith('>')) %}
-      <tr class="{{ 'hl' if flag else '' }}">
+      <tr class="{{ 'hl ' if flag else '' }}{{ 'group-end' if dividers[rowidx] else '' }}">
         {% for c in columns %}
-          {% if editable and c in ['calculated','result'] %}
-          <td class="mono editable" data-row="{{ rowidx }}" data-col="{{ c }}" title="ดับเบิลคลิกเพื่อแก้">{{ r[c] }}</td>
+          {% if editable and c in ['count','calculated','result'] %}
+          <td class="{{ 'mono ' if c in ['calculated','result'] else '' }}editable" data-row="{{ rowidx }}" data-col="{{ c }}" title="ดับเบิลคลิกเพื่อแก้">{{ r[c] }}</td>
           {% else %}
           <td class="{{ 'mono' if c in ['calculated','result'] else '' }}">{{ r[c] }}</td>
           {% endif %}
@@ -34,7 +34,7 @@
     </tbody>
   </table>
 </div>
-<p class="muted">แถวไฮไลต์ = special case (est. / TNTC / &lt; / &gt;) ควรตรวจก่อนอนุมัติ{% if editable %} · <b>ดับเบิลคลิก</b>ช่อง Calculated/Result เพื่อแก้ผลด้วยมือ{% endif %}</p>
+<p class="muted">แถวไฮไลต์ = special case (est. / TNTC / &lt; / &gt;) ควรตรวจก่อนอนุมัติ · เส้นทึบ = แบ่ง Lab No.{% if editable %} · <b>ดับเบิลคลิก</b>ช่อง Count / Calculated / Result เพื่อแก้ (แก้ Count แล้วคำนวณผลใหม่อัตโนมัติ){% endif %}</p>
 
 <h2>Workflow อนุมัติ</h2>
 <div class="card">
@@ -73,18 +73,24 @@
       var inp = document.createElement("input");
       inp.type = "text"; inp.value = old; inp.className = "celledit";
       td.textContent = ""; td.appendChild(inp); inp.focus(); inp.select();
+      var done = false;
       function save() {
+        if (done) return; done = true;
         var val = inp.value.trim();
         if (val === old) { td.textContent = old; return; }
+        var reason = prompt("ระบุเหตุผลการแก้ไข " + td.dataset.col + " (จะบันทึกในช่องหมายเหตุ):", "");
+        if (reason === null) { td.textContent = old; return; }   // ยกเลิก → ไม่บันทึก
         td.textContent = "…";
         fetch(EDIT_URL, {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ row: +td.dataset.row, col: td.dataset.col, value: val })
+          body: JSON.stringify({ row: +td.dataset.row, col: td.dataset.col, value: val, reason: reason })
         })
         .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
         .then(function (res) {
-          if (res.ok && res.j.ok) { td.textContent = res.j.value; td.classList.add("edited"); }
-          else { td.textContent = old; alert(res.j.error || "บันทึกไม่สำเร็จ"); }
+          if (res.ok && res.j.ok) {
+            if (res.j.reload) { location.reload(); }              // แก้ count → คำนวณใหม่ทั้งตาราง
+            else { td.textContent = res.j.value; td.classList.add("edited"); }
+          } else { td.textContent = old; alert(res.j.error || "บันทึกไม่สำเร็จ"); }
         })
         .catch(function () { td.textContent = old; alert("เชื่อมต่อไม่สำเร็จ"); });
       }
