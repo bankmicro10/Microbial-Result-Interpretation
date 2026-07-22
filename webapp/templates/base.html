@@ -22,8 +22,6 @@
   .usermenu{margin-left:auto;display:flex;align-items:center;gap:14px;font-size:13px}
   .usermenu .uname{color:#fff;font-weight:600}
   .usermenu a{color:#fff;opacity:.9;text-decoration:underline}
-  .usermenu .backlink{background:rgba(255,255,255,.16);color:#fff;padding:6px 12px;border-radius:8px;text-decoration:none;font-weight:600;white-space:nowrap}
-  .usermenu .backlink:hover{background:rgba(255,255,255,.30);text-decoration:none}
   .authwrap{max-width:400px;margin:40px auto}
   .authwrap .btn{width:100%;text-align:center;padding:11px}
   .btn.google{background:#fff;color:#3c4043;border:1px solid var(--bd);display:flex;align-items:center;justify-content:center;gap:8px}
@@ -98,10 +96,6 @@
     </div>
     {% if current_user.is_authenticated %}
     <div class="usermenu">
-      {% if request.endpoint not in ['index', 'auth.login', 'auth.register'] %}
-      <a class="backlink" href="{{ url_for('index') }}"
-         onclick="if(history.length>1){history.back();return false;}">← กลับ ไปยัง Page ก่อนหน้า</a>
-      {% endif %}
       <span class="uname">👤 {{ current_user.username }}</span>
       <a href="{{ url_for('auth.logout') }}">ออกจากระบบ</a>
     </div>
