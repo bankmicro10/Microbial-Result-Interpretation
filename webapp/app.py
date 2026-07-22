@@ -283,6 +283,12 @@ def download(bid):
         else:                                             # fallback: คอลัมน์ canonical
             with pd.ExcelWriter(buf, engine="openpyxl") as w:
                 edited_df.to_excel(w, index=False)
+                ws = next(iter(w.sheets.values()))
+                ws.print_title_rows = "1:1"               # ทำซ้ำหัวตารางทุกหน้าเมื่อพิมพ์หลายหน้า
+                _name = os.path.splitext(b.filename)[0]
+                for _f in (ws.oddFooter, ws.evenFooter):  # footer ทุกหน้า: ชื่อไฟล์ + เลขหน้า
+                    _f.left.text = _name
+                    _f.right.text = "หน้า &P/&N"
     finally:
         try:
             os.remove(path)
