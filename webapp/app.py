@@ -223,27 +223,34 @@ def decide(bid, action):
 @app.route("/batch/<bid>/edit", methods=["POST"])
 @login_required
 def edit_cell(bid):
-    """แก้ค่า count/calculated/result แบบ manual (double-click) — บันทึกลง result_json
-    - แก้ count → คำนวณ + แปลผลใหม่ทั้ง batch ตาม count ใหม่
-    - เหตุผลการแก้ไข (reason) → ใส่ในช่องหมายเหตุ (remark) ของแถวที่แก้"""
+    """แก้ค่า dilution/count/remark แบบ manual (double-click) — บันทึกลง result_json
+    - แก้ dilution/count → คำนวณ + แปลผลใหม่ทั้ง batch ตามค่าใหม่
+      และบันทึกประวัติการแก้ไข (จาก→เป็น) ลงช่องหมายเหตุ (remark) ของแถวที่แก้อัตโนมัติ
+    - แก้ remark → แก้ข้อความหมายเหตุตรง ๆ (ไม่คำนวณใหม่)"""
     b = _owned_batch(bid)
     if b.status == "Approved":                           # อนุมัติแล้ว ล็อกไม่ให้แก้
         return {"ok": False, "error": "อนุมัติแล้ว แก้ไม่ได้"}, 403
     p = request.get_json(silent=True) or {}
     row, col = p.get("row"), p.get("col")
     val = "" if p.get("value") is None else str(p.get("value")).strip()
-    reason = (p.get("reason") or "").strip()
-    if col not in ("count", "calculated", "result") or not isinstance(row, int):
+    if col not in ("dilution", "count", "remark") or not isinstance(row, int):
         return {"ok": False, "error": "bad request"}, 400
     data = json.loads(b.result_json)
     rows = data["rows"]
     if not (0 <= row < len(rows)):
         return {"ok": False, "error": "row out of range"}, 400
-    old = rows[row].get(col, "")
+    old = str(rows[row].get(col, "") or "")
     rows[row][col] = val
 
     recalced = False
-    if col == "count":                                   # แก้ count → คำนวณ/แปลผลใหม่ทั้ง batch
+    if col in ("dilution", "count"):                     # แก้ dilution/count → คำนวณ/แปลผลใหม่ทั้ง batch
+        # เก็บประวัติการแก้ไขเดิม (segment ที่ขึ้นต้น "แก้ไข") ต่อแถว ก่อน recalc จะเขียนทับ remark
+        hist = {}
+        for i, r in enumerate(rows):
+            segs = [s.strip() for s in str(r.get("remark", "") or "").split("|")
+                    if s.strip().startswith("แก้ไข")]
+            if segs:
+                hist[i] = segs
         indf = pd.DataFrame(rows)[["lab_code", "analyte", "dilution", "count"]].copy()
         for _c in ("calculated", "result", "remark"):
             indf[_c] = ""
@@ -251,14 +258,16 @@ def edit_cell(bid):
         rows = newdf.fillna("").to_dict("records")
         data["columns"] = list(newdf.columns)
         recalced = True
-
-    if reason:                                           # เหตุผล → ช่องหมายเหตุของแถวที่แก้
-        cur = str(rows[row].get("remark", "") or "").strip()
-        rows[row]["remark"] = f"{cur} | {reason}" if cur else reason
+        # เพิ่มประวัติใหม่ของแถวที่แก้ แล้วนำประวัติทั้งหมด (เดิม+ใหม่) กลับไปต่อท้าย remark
+        label = "Dilution" if col == "dilution" else "count"
+        hist.setdefault(row, []).append(f"แก้ไข {label} จาก {old or '-'} เป็น {val or '-'}")
+        for i, segs in hist.items():
+            cur = str(rows[i].get("remark", "") or "").strip()
+            joined = " | ".join(segs)
+            rows[i]["remark"] = f"{cur} | {joined}" if cur else joined
     data["rows"] = rows
     b.result_json = json.dumps(data, ensure_ascii=False)
-    b.add_audit("Manual edit", current_user.username,
-                f"{col}[{row}]: {old!r} → {val!r}" + (f" | เหตุผล: {reason}" if reason else ""))
+    b.add_audit("Manual edit", current_user.username, f"{col}[{row}]: {old!r} → {val!r}")
     db.session.commit()
     return {"ok": True, "value": val, "reload": recalced}
 

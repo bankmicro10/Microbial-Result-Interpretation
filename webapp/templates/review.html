@@ -27,8 +27,8 @@
       {% set flag = res and (res.endswith('est.') or 'TNTC' in res or res.startswith('<') or res.startswith('>')) %}
       <tr class="{{ 'hl ' if flag else '' }}{{ 'group-end' if dividers[rowidx] else '' }}">
         {% for c in columns %}
-          {% if editable and c in ['count','calculated','result'] %}
-          <td class="{{ 'mono ' if c in ['calculated','result'] else '' }}editable" data-row="{{ rowidx }}" data-col="{{ c }}" title="ดับเบิลคลิกเพื่อแก้">{{ r[c] }}</td>
+          {% if editable and c in ['dilution','count','remark'] %}
+          <td class="editable" data-row="{{ rowidx }}" data-col="{{ c }}" title="ดับเบิลคลิกเพื่อแก้">{{ r[c] }}</td>
           {% else %}
           <td class="{{ 'mono' if c in ['calculated','result'] else '' }}">{{ r[c] }}</td>
           {% endif %}
@@ -38,7 +38,7 @@
     </tbody>
   </table>
 </div>
-<p class="muted">แถวไฮไลต์ = special case (est. / TNTC / &lt; / &gt;) ควรตรวจก่อนอนุมัติ · เส้นทึบ = แบ่ง Lab No.{% if editable %} · <b>ดับเบิลคลิก</b>ช่อง Count / Calculated / Result เพื่อแก้ (แก้ Count แล้วคำนวณผลใหม่อัตโนมัติ){% endif %}</p>
+<p class="muted">แถวไฮไลต์ = special case (est. / TNTC / &lt; / &gt;) ควรตรวจก่อนอนุมัติ · เส้นทึบ = แบ่ง Lab No.{% if editable %} · <b>ดับเบิลคลิก</b>ช่อง Dilution / Count / Remark เพื่อแก้ (แก้ Dilution/Count แล้วคำนวณผลใหม่ + บันทึกประวัติการแก้ไขลง Remark อัตโนมัติ){% endif %}</p>
 
 <h2>Workflow อนุมัติ</h2>
 <div class="card">
@@ -82,12 +82,10 @@
         if (done) return; done = true;
         var val = inp.value.trim();
         if (val === old) { td.textContent = old; return; }
-        var reason = prompt("ระบุเหตุผลการแก้ไข " + td.dataset.col + " (จะบันทึกในช่องหมายเหตุ):", "");
-        if (reason === null) { td.textContent = old; return; }   // ยกเลิก → ไม่บันทึก
         td.textContent = "…";
         fetch(EDIT_URL, {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ row: +td.dataset.row, col: td.dataset.col, value: val, reason: reason })
+          body: JSON.stringify({ row: +td.dataset.row, col: td.dataset.col, value: val })
         })
         .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
         .then(function (res) {
