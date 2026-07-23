@@ -2,7 +2,7 @@
 {% block body %}
 {% with step = 3 if b.status == 'Approved' else 2 %}{% include "_stepper.html" %}{% endwith %}
 <p style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
-  <a href="{{ url_for('index') }}">← กลับหน้า upload</a>
+  <a class="btn ghost" style="padding:6px 14px" href="{{ url_for('index') }}">← กลับหน้า upload</a>
   <a class="btn ghost" style="padding:6px 14px" href="{{ url_for('index') }}"
      onclick="if(history.length>1){history.back();return false;}">← กลับ ไปยัง Page ก่อนหน้า</a>
 </p>
