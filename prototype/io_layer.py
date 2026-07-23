@@ -391,7 +391,18 @@ def _apply_print_layout(data: dict, sheet_part: str, header_last_row: int):
         m = re.search(r"<pageSetup\b[^>]*/>", sx)
         if m:
             sx = sx[:m.end()] + hf + sx[m.end():]
-            data[sheet_part] = sx.encode("utf-8")
+        # เว้น margin ล่าง + footer ให้มีที่ว่างสำหรับ footer 3 บรรทัด (กัน footer ทับท้ายตาราง)
+        mm = re.search(r"<pageMargins\b[^>]*/>", sx)
+        if mm:
+            tag = mm.group(0)
+            for attr, minv in (("bottom", 0.6), ("footer", 0.25)):
+                g = re.search(rf'\s{attr}="([\d.]+)"', tag)
+                if g and float(g.group(1)) < minv:
+                    tag = tag[:g.start()] + f' {attr}="{minv}"' + tag[g.end():]
+                elif not g:
+                    tag = tag[:-2] + f' {attr}="{minv}"/>'
+            sx = sx[:mm.start()] + tag + sx[mm.end():]
+        data[sheet_part] = sx.encode("utf-8")
 
     # 2) Print_Titles → workbook.xml (definedName, localSheetId=0 = sheet แรก)
     wbp = "xl/workbook.xml"
@@ -409,6 +420,102 @@ def _apply_print_layout(data: dict, sheet_part: str, header_last_row: int):
             data[wbp] = wb.encode("utf-8")
 
 
+def _fit_to_width(data: dict, sheet_part: str):
+    """บังคับพิมพ์ให้ตารางกว้างพอดี 1 หน้ากระดาษ (fit to width, สูงกี่หน้าก็ได้) — กันคอลัมน์ล้นหน้า"""
+    sx = data[sheet_part].decode("utf-8")
+    # sheetPr → <pageSetUpPr fitToPage="1"/> (จำเป็นเพื่อให้ fitToWidth/Height มีผล)
+    pm = re.search(r"<pageSetUpPr\b[^>]*?/>", sx)
+    if pm:                                                          # มีอยู่แล้ว (อาจว่าง) → บังคับ fitToPage="1"
+        tag = pm.group(0)
+        tag = (re.sub(r'fitToPage="[^"]*"', 'fitToPage="1"', tag) if "fitToPage=" in tag
+               else tag[:-2] + ' fitToPage="1"/>')
+        sx = sx[:pm.start()] + tag + sx[pm.end():]
+    else:                                                          # ยังไม่มี → แทรกใน sheetPr (สร้าง sheetPr ถ้าจำเป็น)
+        m = re.search(r"<sheetPr\b[^>]*?/>", sx)                    # <sheetPr .../> ปิดเอง
+        if m:
+            sx = sx[:m.start()] + m.group(0)[:-2] + '><pageSetUpPr fitToPage="1"/></sheetPr>' + sx[m.end():]
+        elif "</sheetPr>" in sx:                                    # <sheetPr>...</sheetPr> → แทรกก่อนปิด
+            sx = sx.replace("</sheetPr>", '<pageSetUpPr fitToPage="1"/></sheetPr>', 1)
+        else:                                                      # ไม่มี → สร้างเป็น child แรกของ worksheet
+            sx = re.sub(r"(<worksheet\b[^>]*>)",
+                        r'\1<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>', sx, count=1)
+    # pageSetup → fitToWidth=1 fitToHeight=0 (ลบ scale เพราะขัดกับ fitToPage)
+    m = re.search(r"<pageSetup\b[^>]*/>", sx)
+    if m:
+        tag = m.group(0)
+        for a in ("scale", "fitToWidth", "fitToHeight"):
+            tag = re.sub(rf'\s{a}="[^"]*"', "", tag)
+        tag = tag[:-2] + ' fitToWidth="1" fitToHeight="0"/>'
+        sx = sx[:m.start()] + tag + sx[m.end():]
+    data[sheet_part] = sx.encode("utf-8")
+
+
+def _wrap_remark_cells(data: dict, sheet_part: str, remark_refs: list):
+    """เปิด wrap text ให้เซลล์หมายเหตุ (คัดลอก style เดิม + เพิ่ม wrapText) + ปล่อยความสูงแถวให้ auto-fit"""
+    if not remark_refs or "xl/styles.xml" not in data:
+        return
+    sx = data[sheet_part].decode("utf-8")
+    st = data["xl/styles.xml"].decode("utf-8")
+    cm = re.search(r"(<cellXfs\b[^>]*>)(.*?)(</cellXfs>)", st, re.S)
+    if not cm:
+        return
+    # จับ <xf .../> หรือ <xf ...>...</xf> ให้ถูก (อย่าหยุดที่ /> ของ <alignment/> ลูก)
+    xf_list = re.findall(r"<xf\b[^>]*?(?:/>|>.*?</xf>)", cm.group(2), re.S)
+    base_count = len(xf_list)
+
+    def _wrap_variant(xf: str) -> str:
+        if xf.endswith("/>"):
+            head, children = xf[:-2], ""
+        else:
+            hm = re.match(r"(<xf\b[^>]*)>(.*)</xf>", xf, re.S)
+            head, children = hm.group(1), hm.group(2)
+        if "applyAlignment=" in head:
+            head = re.sub(r'applyAlignment="[^"]*"', 'applyAlignment="1"', head)
+        else:
+            head += ' applyAlignment="1"'
+        am = re.search(r"<alignment\b[^>]*/>", children)
+        if am:
+            al = am.group(0)
+            al = (re.sub(r'wrapText="[^"]*"', 'wrapText="1"', al) if "wrapText=" in al
+                  else al[:-2] + ' wrapText="1"/>')
+            children = children[:am.start()] + al + children[am.end():]
+        else:
+            children = '<alignment wrapText="1"/>' + children
+        return head + ">" + children + "</xf>"
+
+    wrap_of, new_xfs = {}, []
+    for ref in remark_refs:
+        m = re.search(rf'(<c r="{ref}")([^>]*?)(/?)>', sx)
+        if not m:
+            continue
+        pre, attrs, slash = m.group(1), m.group(2), m.group(3)
+        sm = re.search(r'\ss="(\d+)"', attrs)
+        base = int(sm.group(1)) if sm else 0
+        if base >= base_count:
+            base = 0
+        if base not in wrap_of:
+            wrap_of[base] = base_count + len(new_xfs)
+            new_xfs.append(_wrap_variant(xf_list[base]))
+        nidx = wrap_of[base]
+        attrs = (attrs[:sm.start()] + f' s="{nidx}"' + attrs[sm.end():]) if sm else attrs + f' s="{nidx}"'
+        sx = sx[:m.start()] + pre + attrs + slash + ">" + sx[m.end():]
+
+    if not new_xfs:
+        return
+    # ปล่อยความสูงแถวหมายเหตุให้ auto-fit ตาม wrap (ลบ customHeight ของแถวนั้น)
+    for rn in {re.search(r"\d+$", r).group() for r in remark_refs}:
+        rm = re.search(rf'<row r="{rn}"[^>]*>', sx)
+        if rm and 'customHeight="1"' in rm.group(0):
+            sx = sx[:rm.start()] + rm.group(0).replace(' customHeight="1"', "") + sx[rm.end():]
+
+    new_cellxfs = cm.group(1) + cm.group(2) + "".join(new_xfs) + cm.group(3)
+    st = st[:cm.start()] + new_cellxfs + st[cm.end():]
+    st = re.sub(r'(<cellXfs\b[^>]*\bcount=")\d+(")',
+                lambda g: g.group(1) + str(base_count + len(new_xfs)) + g.group(2), st, count=1)
+    data["xl/styles.xml"] = st.encode("utf-8")
+    data[sheet_part] = sx.encode("utf-8")
+
+
 def write_back_template(out_df: pd.DataFrame, meta: dict, dest):
     """เขียน calculated/result/remark กลับลงไฟล์ฟอร์มเดิม (คงเลย์เอาต์ + form control/checkbox).
     แก้เฉพาะ sheet xml ในไฟล์ zip — part อื่น (ctrlProps/vmlDrawing/drawing/media) copy byte-for-byte.
@@ -417,6 +524,7 @@ def write_back_template(out_df: pd.DataFrame, meta: dict, dest):
     pos, src_rows = meta["pos"], meta["src_rows"]
 
     cells: dict[tuple[int, int], str] = {}
+    remark_refs: list[str] = []
     for i, src in enumerate(src_rows):
         if i >= len(out_df):
             break
@@ -427,6 +535,8 @@ def write_back_template(out_df: pd.DataFrame, meta: dict, dest):
                 val = row.get(col, "")
                 if pd.notna(val) and str(val).strip():
                     cells[(src + 1, pos[col] + 1)] = str(val)             # (row,col) 1-based
+                    if col == "remark":
+                        remark_refs.append(f"{_col_letter(pos[col] + 1)}{src + 1}")
 
     with zipfile.ZipFile(meta["path"]) as zin:
         names = zin.namelist()
@@ -437,6 +547,8 @@ def write_back_template(out_df: pd.DataFrame, meta: dict, dest):
     data[sheet_part] = _inject_cells_inline(data[sheet_part], cells)
     if src_rows:                                     # ทำซ้ำหัว + footer ทุกหน้า (multi-page)
         _apply_print_layout(data, sheet_part, header_last_row=src_rows[0])
+        _fit_to_width(data, sheet_part)              # ตารางกว้างพอดี 1 หน้า
+        _wrap_remark_cells(data, sheet_part, remark_refs)  # wrap หมายเหตุยาว
 
     with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as zout:
         for n in names:
