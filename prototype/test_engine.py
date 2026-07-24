@@ -7,7 +7,7 @@ from interpretation_engine import (
 ISO = {"countable_range": [10, 150], "report_sig_figs": 2,
        "rounding": "half_up", "report_format": "auto"}
 FDA = {"countable_range": [15, 300], "report_sig_figs": 2,
-       "rounding": "bankers", "report_format": "plain_grouped"}
+       "rounding": "bankers", "report_format": "scientific"}
 GEN = {"countable_range": [15, 150], "report_sig_figs": 2,
        "rounding": "bankers", "report_format": "scientific", "ratio_threshold": 2.0}
 
@@ -60,8 +60,9 @@ def test_iso_over150_lowest_readable_next():
 
 # ---- FDA BAM ----
 def test_case7_fda_weighted_average():
+    # SC=537, (n1=2,n2=2,d=0.01) → 537/((2+0.1·2)·0.01)=24409 → 2.4E+04 (scientific เหมือน ISO/General)
     r = interpret_fda([PlateSet(0.01, [232, 244]), PlateSet(0.001, [33, 28])], FDA)
-    assert r.result == "24,000"
+    assert r.result == "2.4E+04"
 
 
 # ---- General (3.General) ----

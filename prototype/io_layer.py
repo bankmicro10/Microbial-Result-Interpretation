@@ -32,7 +32,7 @@ STANDARDS = {
     "ISO7218": {"label": "ISO 7218:2024", "countable_range": [10, 150], "report_sig_figs": 2,
                 "rounding": "half_up", "report_format": "auto"},
     "FDA_BAM": {"label": "FDA BAM Chapter 3 (2026)", "countable_range": [15, 300], "report_sig_figs": 2,
-                "rounding": "bankers", "report_format": "plain_grouped"},
+                "rounding": "bankers", "report_format": "scientific"},
     "General": {"label": "General (in-house)", "countable_range": [15, 150], "report_sig_figs": 2,
                 "rounding": "bankers", "report_format": "scientific",
                 "ratio_threshold": 2.0},

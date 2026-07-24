@@ -14,7 +14,7 @@ standards:
     countable_range: [15, 300]
     report_sig_figs: 2
     rounding: bankers            # เลข 5 ดูหลักที่ 2 คู่/คี่
-    report_format: plain_grouped # 24,000
+    report_format: scientific    # X.YE+NN เหมือน ISO/General (เดิม plain_grouped 24,000)
     out_of_range_tag: "EAPC"
   General:
     label: "General (in-house / 3.General)"
